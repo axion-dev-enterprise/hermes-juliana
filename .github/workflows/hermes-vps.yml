@@ -1,0 +1,78 @@
+name: Hermes Juliana CI and VPS deploy
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hermes-juliana-production
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate gateway
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: node --check server.js
+      - run: node --check lib/autonomy_engine.js
+      - run: npm test
+
+  deploy:
+    name: Deploy VPS
+    needs: validate
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package canonical service contexts
+        run: |
+          tar -czf hermes-gateway.tgz server.js package.json package-lock.json Dockerfile lib prompts docs
+          tar -czf hermes-webchat.tgz public Dockerfile.webchat nginx
+      - name: Upload gateway context
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_SSH_PASSWORD }}
+          source: hermes-gateway.tgz
+          target: /tmp
+      - name: Upload webchat context
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_SSH_PASSWORD }}
+          source: hermes-webchat.tgz
+          target: /tmp
+      - name: Rebuild services and validate health
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_SSH_PASSWORD }}
+          script_stop: true
+          script: |
+            set -eu
+            mkdir -p /opt/hermes/services/hermes-gateway /opt/hermes/services/hermes-webchat
+            tar -xzf /tmp/hermes-gateway.tgz -C /opt/hermes/services/hermes-gateway
+            tar -xzf /tmp/hermes-webchat.tgz -C /opt/hermes/services/hermes-webchat
+            mv /opt/hermes/services/hermes-webchat/Dockerfile.webchat /opt/hermes/services/hermes-webchat/Dockerfile
+            printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-gateway/.dockerignore
+            printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-webchat/.dockerignore
+            grep -q '^HERMES_TEST_MODE=' /opt/hermes/.env && sed -i 's/^HERMES_TEST_MODE=.*/HERMES_TEST_MODE=true/' /opt/hermes/.env || printf '\nHERMES_TEST_MODE=true\n' >> /opt/hermes/.env
+            cd /opt/hermes
+            docker compose up -d --build hermes-gateway hermes-webchat
+            sleep 10
+            docker exec hermes-gateway wget -qO- http://127.0.0.1:8000/healthz

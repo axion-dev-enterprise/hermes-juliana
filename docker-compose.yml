@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  hermes-gateway-juliana:
+  hermes-gateway:
     build: .
     image: hermes-gateway-juliana:v5.1.0
     container_name: hermes-gateway-juliana
