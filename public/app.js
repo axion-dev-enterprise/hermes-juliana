@@ -325,7 +325,11 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
           <span class="folder-badge">0 sessões</span>
         </div>
-        <div style="font-size: 12px; color: var(--text-muted); padding: 12px; text-align: center;">Nenhuma sessão ativa. Clique em "Nova Conversa".</div>
+        <div class="sessions-empty">
+          <i class="fa-solid fa-comments"></i>
+          <span>Nenhuma sessão ativa</span>
+          <span style="font-size: 0.72rem; opacity: 0.6; margin-top: 2px;">Clique em "+ Nova Conversa"</span>
+        </div>
       </div>
     `;
   }
