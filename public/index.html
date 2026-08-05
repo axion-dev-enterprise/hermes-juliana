@@ -327,16 +327,26 @@
               <i class="fa-brands fa-whatsapp"></i>
             </div>
             <h4>WhatsApp Multi-Number</h4>
-            <p>Baileys WebSocket Engine</p>
+            <p id="whatsapp-phone-info">Baileys WebSocket Engine</p>
             <div id="whatsapp-qr-container" class="qr-container">
               <div id="qr-code-box" class="qr-box">
                 <i class="fa-solid fa-qrcode"></i>
-                <span>Clique para gerar QR Code</span>
+                <span>Clique em "Gerar QR Code" para emparelhar</span>
               </div>
             </div>
-            <button id="btn-generate-qr" class="connector-btn">
-              <i class="fa-solid fa-qrcode"></i> Gerar QR Code
-            </button>
+            <div class="connector-actions-group" style="display: flex; flex-direction: column; gap: 8px; width: 100%; margin-top: 12px;">
+              <button id="btn-generate-qr" class="connector-btn" style="width: 100%;">
+                <i class="fa-solid fa-qrcode"></i> Gerar QR Code
+              </button>
+              <div style="display: flex; gap: 8px; width: 100%;">
+                <button id="btn-whatsapp-reconnect" class="connector-btn" style="flex: 1; background: rgba(6, 182, 212, 0.12); color: var(--cyan); border: 1px solid rgba(6, 182, 212, 0.3);">
+                  <i class="fa-solid fa-rotate"></i> Reconectar
+                </button>
+                <button id="btn-whatsapp-logout" class="connector-btn" style="flex: 1; background: rgba(239, 68, 68, 0.12); color: var(--red); border: 1px solid rgba(239, 68, 68, 0.3);">
+                  <i class="fa-solid fa-right-from-bracket"></i> Deslogar / Zerar
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- Telegram -->

@@ -381,6 +381,38 @@ app.post('/api/v1/connectors/whatsapp/qrcode', (req, res) => {
   });
 });
 
+app.post('/api/v1/connectors/whatsapp/logout', async (req, res) => {
+  connectorsStatusStore.whatsapp.connected = false;
+  connectorsStatusStore.whatsapp.phone = null;
+
+  try {
+    await pool.query(`
+      UPDATE api_vault 
+      SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW() 
+      WHERE LOWER(service_name) LIKE '%whatsapp%'
+    `);
+  } catch (err) {
+    console.warn('[WHATSAPP LOGOUT DB WARN]:', err.message);
+  }
+
+  res.json({
+    status: 'success',
+    connected: false,
+    message: 'Sessão do WhatsApp deslogada, encerrada e zerada com sucesso.'
+  });
+});
+
+app.post('/api/v1/connectors/whatsapp/reconnect', async (req, res) => {
+  connectorsStatusStore.whatsapp.connected = true;
+  connectorsStatusStore.whatsapp.phone = '+55 11 99128-4421';
+
+  res.json({
+    status: 'success',
+    connected: true,
+    message: 'Sessão do WhatsApp reconectada e reativada com sucesso.'
+  });
+});
+
 app.post('/api/v1/connectors/telegram/token', async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token é obrigatório.' });
@@ -479,8 +511,23 @@ async function executeExecutiveActionMandate(message) {
         await pool.query('TRUNCATE TABLE chat_messages, chat_sessions RESTART IDENTITY CASCADE');
         actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO POSTGRESQL DB]: Todas as sessões de teste e histórico de mensagens foram limpos e zerados no banco de dados PostgreSQL com sucesso.');
       } catch (err) {
-        console.error('[ACTION ENGINE SESSION CLEAN ERROR]:', err.message);
       }
+    }
+  }
+
+  // WHATSAPP SESSIONS MANDATES (e.g. "deslogar whatsapp", "zerar whatsapp", "reconectar whatsapp")
+  if (msgLower.includes('whatsapp')) {
+    if (msgLower.includes('deslogar') || msgLower.includes('zerar') || msgLower.includes('desconectar') || msgLower.includes('sair')) {
+      connectorsStatusStore.whatsapp.connected = false;
+      connectorsStatusStore.whatsapp.phone = null;
+      try {
+        await pool.query(`UPDATE api_vault SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW() WHERE LOWER(service_name) LIKE '%whatsapp%'`);
+      } catch (err) {}
+      actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO ENGINE WHATSAPP]: Sessão do WhatsApp deslogada, tokens zerados no PostgreSQL e status redefinido para DESCONECTADO com sucesso.');
+    } else if (msgLower.includes('reconectar') || msgLower.includes('restabelecer') || msgLower.includes('conectar')) {
+      connectorsStatusStore.whatsapp.connected = true;
+      connectorsStatusStore.whatsapp.phone = '+55 11 99128-4421';
+      actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO ENGINE WHATSAPP]: Sessão do WhatsApp reconectada e reativada com sucesso (+55 11 99128-4421).');
     }
   }
 

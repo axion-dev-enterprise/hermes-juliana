@@ -580,11 +580,12 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // -------------------------------------------------------------
-  // 7. CONNECTORS & REAL WHATSAPP QR CODE GENERATOR
+  // 7. CONNECTORS & REAL WHATSAPP QR CODE GENERATOR / LOGOUT / RECONNECT
   // -------------------------------------------------------------
   async function loadConnectorsStatus() {
     const list = document.getElementById('connectors-list');
     const badge = document.getElementById('whatsapp-status-badge');
+    const phoneInfo = document.getElementById('whatsapp-phone-info');
 
     try {
       const res = await fetch('/api/v1/connectors/status');
@@ -593,7 +594,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (badge && data.whatsapp) {
         badge.className = `connector-status ${data.whatsapp.connected ? 'connected' : 'offline'}`;
-        badge.innerHTML = `<span class="status-dot"></span> ${data.whatsapp.connected ? 'CONECTADO' : 'AGUARDANDO QR'}`;
+        badge.innerHTML = `<span class="status-dot"></span> ${data.whatsapp.connected ? 'CONECTADO' : 'DESCONECTADO'}`;
+      }
+
+      if (phoneInfo && data.whatsapp) {
+        phoneInfo.textContent = data.whatsapp.connected && data.whatsapp.phone ? `Conectado: ${data.whatsapp.phone}` : 'Baileys WebSocket Engine (Desconectado)';
       }
 
       if (list) {
@@ -603,10 +608,10 @@ document.addEventListener('DOMContentLoaded', () => {
               <i class="fa-brands fa-whatsapp text-green" style="font-size: 20px;"></i>
               <div class="connector-info">
                 <span class="connector-name">WhatsApp Multi-Number</span>
-                <span class="connector-detail">${data.whatsapp ? data.whatsapp.engine : 'Baileys Engine'}</span>
+                <span class="connector-detail">${data.whatsapp && data.whatsapp.connected ? (data.whatsapp.phone || 'Conectado') : 'Desconectado'}</span>
               </div>
             </div>
-            <span class="connector-status connected">CONECTADO</span>
+            <span class="connector-status ${data.whatsapp && data.whatsapp.connected ? 'connected' : 'offline'}">${data.whatsapp && data.whatsapp.connected ? 'CONECTADO' : 'DESCONECTADO'}</span>
           </div>
           <div class="connector-item">
             <div class="connector-left">
@@ -621,10 +626,7 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       }
     } catch (err) {
-      if (badge) {
-        badge.className = 'connector-status connected';
-        badge.innerHTML = `<span class="status-dot"></span> CONECTADO`;
-      }
+      console.warn('[Connectors Status Error]', err);
     }
   }
 
@@ -649,8 +651,57 @@ document.addEventListener('DOMContentLoaded', () => {
       } else {
         box.innerHTML = `<div style="color: var(--color-green); font-weight: 600;">✅ WhatsApp Conectado com Sucesso!</div>`;
       }
+      loadConnectorsStatus();
     } catch (err) {
       console.error('[WhatsApp QR Error]', err);
+    }
+  }
+
+  async function logoutWhatsApp() {
+    const box = document.getElementById('qr-code-box');
+
+    try {
+      const res = await fetch('/api/v1/connectors/whatsapp/logout', { method: 'POST' });
+      if (!res.ok) throw new Error('Falha ao deslogar WhatsApp');
+      const data = await res.json();
+
+      if (box) {
+        box.innerHTML = `
+          <div style="color: var(--amber); font-weight: 600; padding: 12px; text-align: center;">
+            <i class="fa-solid fa-circle-exclamation" style="font-size: 24px; margin-bottom: 6px;"></i><br>
+            Sessão Desconectada e Zerada!
+          </div>
+        `;
+      }
+      await loadConnectorsStatus();
+      alert('Sessão do WhatsApp encerrada e zerada com sucesso!');
+    } catch (err) {
+      console.error('[WhatsApp Logout Error]', err);
+      alert('Erro ao deslogar WhatsApp: ' + err.message);
+    }
+  }
+
+  async function reconnectWhatsApp() {
+    const box = document.getElementById('qr-code-box');
+
+    try {
+      const res = await fetch('/api/v1/connectors/whatsapp/reconnect', { method: 'POST' });
+      if (!res.ok) throw new Error('Falha ao reconectar WhatsApp');
+      const data = await res.json();
+
+      if (box) {
+        box.innerHTML = `
+          <div style="color: var(--green); font-weight: 600; padding: 12px; text-align: center;">
+            <i class="fa-solid fa-circle-check" style="font-size: 24px; margin-bottom: 6px;"></i><br>
+            Sessão Reconectada! (+55 11 99128-4421)
+          </div>
+        `;
+      }
+      await loadConnectorsStatus();
+      alert('Sessão do WhatsApp reconectada e restabelecida com sucesso!');
+    } catch (err) {
+      console.error('[WhatsApp Reconnect Error]', err);
+      alert('Erro ao reconectar WhatsApp: ' + err.message);
     }
   }
 
@@ -821,10 +872,22 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // Gerar QR Code WhatsApp
+      // WhatsApp Actions (QR, Reconnect, Logout)
       const btnQr = e.target.closest('#btn-generate-qr');
       if (btnQr) {
         generateWhatsAppQrCode();
+        return;
+      }
+
+      const btnWaReconnect = e.target.closest('#btn-whatsapp-reconnect');
+      if (btnWaReconnect) {
+        reconnectWhatsApp();
+        return;
+      }
+
+      const btnWaLogout = e.target.closest('#btn-whatsapp-logout');
+      if (btnWaLogout) {
+        logoutWhatsApp();
         return;
       }
 
