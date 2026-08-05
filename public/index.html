@@ -375,32 +375,63 @@
         </div>
       </section>
 
-      <!-- TAB: VAULT -->
       <section id="tab-vault" class="tab-panel hidden">
-        <div class="panel-header">
-          <h3><i class="fa-solid fa-vault text-amber"></i> Cofre de Tokens & Integrações</h3>
-          <p>Gerencie chaves de API com criptografia AES-256</p>
+        <!-- VAULT HERO HEADER -->
+        <div class="vault-hero">
+          <div class="vault-hero-icon">
+            <i class="fa-solid fa-vault"></i>
+          </div>
+          <div class="vault-hero-text">
+            <h2>Cofre Seguro de Integrações</h2>
+            <p>Credenciais protegidas com criptografia AES-256 end-to-end</p>
+          </div>
+          <div class="vault-hero-stats" id="vault-hero-stats">
+            <div class="vstat"><span id="vault-count-total">–</span><small>Tokens</small></div>
+            <div class="vstat vstat-sep"></div>
+            <div class="vstat"><span id="vault-count-services">–</span><small>Serviços</small></div>
+            <div class="vstat vstat-sep"></div>
+            <div class="vstat"><span class="text-green">AES-256</span><small>Criptografia</small></div>
+          </div>
         </div>
 
-        <div class="vault-layout">
-          <div class="vault-form-card">
-            <h4><i class="fa-solid fa-plus-circle text-accent"></i> Adicionar Token</h4>
-            <div class="input-group">
-              <label>Serviço</label>
-              <select id="vault-service-select" class="select-input">
+        <div class="vault-master-layout">
+          <!-- LEFT: ADD TOKEN CARD -->
+          <div class="vault-add-card">
+            <div class="vault-card-header">
+              <div class="vault-card-icon add-icon">
+                <i class="fa-solid fa-key"></i>
+              </div>
+              <div>
+                <h3>Adicionar Credencial</h3>
+                <p>Selecione o serviço e cole sua chave de API</p>
+              </div>
+            </div>
+
+            <!-- SERVICE SEARCH + SELECT -->
+            <div class="vault-field">
+              <label class="vault-label"><i class="fa-solid fa-magnifying-glass"></i> Buscar Serviço</label>
+              <div class="vault-search-wrap">
+                <input type="text" id="vault-service-search" class="vault-search-input" placeholder="ex: OpenRouter, Asaas, ClickUp...">
+              </div>
+            </div>
+
+            <div class="vault-field">
+              <label class="vault-label"><i class="fa-solid fa-grid-2"></i> Serviço</label>
+              <select id="vault-service-select" class="vault-select">
                 <optgroup label="🤖 IA & LLM">
+                  <option value="nous_portal">Nous Portal (Inference Primary) ⚡</option>
                   <option value="openrouter">OpenRouter (Multi-LLM Gateway)</option>
-                  <option value="openai">OpenAI (GPT-4 / DALL-E)</option>
-                  <option value="anthropic">Anthropic (Claude)</option>
+                  <option value="openai">OpenAI — GPT-4o / DALL-E</option>
+                  <option value="anthropic">Anthropic — Claude 3.5</option>
                   <option value="gemini">Google Gemini API</option>
-                  <option value="groq">Groq (Llama / Mixtral)</option>
+                  <option value="groq">Groq — Llama / Mixtral Ultra</option>
                   <option value="perplexity">Perplexity AI</option>
                   <option value="mistral">Mistral AI</option>
-                  <option value="elevenlabs">ElevenLabs (Text-to-Speech)</option>
+                  <option value="elevenlabs">ElevenLabs TTS</option>
                 </optgroup>
                 <optgroup label="📦 Google Workspace">
                   <option value="google_workspace">Google Workspace Admin SDK</option>
-                  <option value="google_oauth">Google OAuth 2.0 (Client Secret)</option>
+                  <option value="google_oauth">Google OAuth 2.0</option>
                   <option value="google_sheets">Google Sheets API</option>
                   <option value="google_drive">Google Drive API</option>
                   <option value="google_calendar">Google Calendar API</option>
@@ -412,32 +443,32 @@
                 <optgroup label="📣 Meta (Facebook / Instagram)">
                   <option value="meta_graph">Meta Graph API v19.0</option>
                   <option value="meta_ads">Meta Ads Manager API</option>
-                  <option value="meta_whatsapp">Meta WhatsApp Business API</option>
+                  <option value="meta_whatsapp">Meta WhatsApp Business</option>
                   <option value="meta_instagram">Instagram Graph API</option>
                   <option value="meta_pixel">Meta Pixel / CAPI Token</option>
                 </optgroup>
                 <optgroup label="💬 Mensageria & Comunicação">
                   <option value="whatsapp">WhatsApp (Baileys / Bridge)</option>
                   <option value="telegram">Telegram Bot</option>
-                  <option value="slack">Slack Bot OAuth Token</option>
+                  <option value="slack">Slack Bot OAuth</option>
                   <option value="discord">Discord Bot Token</option>
                   <option value="twilio">Twilio (SMS / Voice)</option>
-                  <option value="sendgrid">SendGrid (E-mail API)</option>
-                  <option value="mailchimp">Mailchimp (Marketing E-mail)</option>
-                  <option value="brevo">Brevo (ex-Sendinblue)</option>
+                  <option value="sendgrid">SendGrid (E-mail)</option>
+                  <option value="mailchimp">Mailchimp</option>
+                  <option value="brevo">Brevo (Sendinblue)</option>
                 </optgroup>
                 <optgroup label="💰 Financeiro & Pagamentos">
-                  <option value="asaas">Asaas (Cobranças PIX / Boleto)</option>
-                  <option value="stripe">Stripe (Pagamentos Global)</option>
+                  <option value="asaas">Asaas — PIX / Boleto</option>
+                  <option value="stripe">Stripe — Pagamentos Global</option>
                   <option value="mercadopago">Mercado Pago</option>
                   <option value="pagarme">Pagar.me</option>
                   <option value="iugu">Iugu</option>
                   <option value="gerencianet">Gerencianet / Efí Bank</option>
                 </optgroup>
-                <optgroup label="📋 Gestão de Projetos & CRM">
+                <optgroup label="📋 Projetos & CRM">
                   <option value="clickup">ClickUp (Projetos)</option>
                   <option value="notion">Notion API</option>
-                  <option value="trello">Trello Power-Up</option>
+                  <option value="trello">Trello</option>
                   <option value="jira">Jira / Atlassian</option>
                   <option value="hubspot">HubSpot CRM</option>
                   <option value="pipedrive">Pipedrive CRM</option>
@@ -445,7 +476,7 @@
                   <option value="salesforce">Salesforce</option>
                 </optgroup>
                 <optgroup label="🛠️ DevOps & Cloud">
-                  <option value="github">GitHub Personal Access Token</option>
+                  <option value="github">GitHub Personal Access</option>
                   <option value="vercel">Vercel Deploy Token</option>
                   <option value="cloudflare">Cloudflare API Token</option>
                   <option value="aws">AWS Access Key + Secret</option>
@@ -453,51 +484,93 @@
                   <option value="azure">Azure Client Secret</option>
                   <option value="supabase">Supabase Service Role Key</option>
                   <option value="railway">Railway API Token</option>
-                  <option value="sentry">Sentry DSN / Auth Token</option>
+                  <option value="sentry">Sentry DSN / Auth</option>
                 </optgroup>
                 <optgroup label="📊 Analytics & SEO">
                   <option value="semrush">SEMrush API</option>
                   <option value="ahrefs">Ahrefs API</option>
-                  <option value="hotjar">Hotjar Site ID / Token</option>
-                  <option value="mixpanel">Mixpanel Token</option>
-                  <option value="amplitude">Amplitude API Key</option>
+                  <option value="hotjar">Hotjar</option>
+                  <option value="mixpanel">Mixpanel</option>
+                  <option value="amplitude">Amplitude</option>
                 </optgroup>
                 <optgroup label="🔗 Outros Conectores">
                   <option value="openweather">OpenWeather API</option>
-                  <option value="maps">Google Maps / Places API</option>
+                  <option value="maps">Google Maps / Places</option>
                   <option value="shopify">Shopify Admin API</option>
-                  <option value="woocommerce">WooCommerce REST API</option>
+                  <option value="woocommerce">WooCommerce REST</option>
                   <option value="n8n">n8n Webhook Token</option>
                   <option value="zapier">Zapier NLA Key</option>
-                  <option value="make">Make (Integromat) API Key</option>
+                  <option value="make">Make (Integromat) API</option>
                   <option value="custom">Personalizado / Outro</option>
                 </optgroup>
               </select>
             </div>
-            <div class="input-group">
-              <label>API Token</label>
-              <input type="password" id="vault-token-input" placeholder="$aAct_..." class="input-compact">
+
+            <!-- TOKEN INPUT WITH TOGGLE -->
+            <div class="vault-field">
+              <label class="vault-label"><i class="fa-solid fa-lock-keyhole"></i> API Token / Secret</label>
+              <div class="vault-token-wrap">
+                <input type="password" id="vault-token-input" class="vault-token-input" placeholder="Cole a chave aqui...">
+                <button class="vault-toggle-vis" id="vault-toggle-vis" title="Mostrar/Ocultar">
+                  <i class="fa-solid fa-eye" id="vault-eye-icon"></i>
+                </button>
+              </div>
+              <span class="vault-hint" id="vault-token-hint"></span>
             </div>
-            <button id="btn-save-vault-key" class="connector-btn full">
-              <i class="fa-solid fa-lock"></i> Salvar no Vault
+
+            <button id="btn-save-vault-key" class="vault-save-btn">
+              <i class="fa-solid fa-shield-check"></i>
+              <span>Salvar no Vault com AES-256</span>
+              <div class="vault-btn-glow"></div>
             </button>
-          </div>
 
-          <div class="vault-status-card">
-            <h4><i class="fa-solid fa-shield-halved text-green"></i> Status dos Serviços</h4>
-            <div id="vault-keys-list" class="vault-list">
-              <div class="vault-empty">
-                <i class="fa-solid fa-spinner fa-spin"></i> Consultando...
-              </div>
+            <div class="vault-security-info">
+              <i class="fa-solid fa-circle-info"></i>
+              Tokens são criptografados antes de serem armazenados no PostgreSQL. Nunca exibidos em logs.
             </div>
           </div>
 
-          <div class="vault-status-card" style="grid-column: span 2;">
-            <h4><i class="fa-solid fa-plug text-accent"></i> Conectores Ativos</h4>
-            <div id="connectors-list" class="connectors-list">
-              <div class="vault-empty">
-                <i class="fa-solid fa-spinner fa-spin"></i> Consultando conectores...
+          <!-- RIGHT: ACTIVE TOKENS LIST -->
+          <div class="vault-right-panel">
+            <!-- STATUS HEADER -->
+            <div class="vault-status-header">
+              <div class="vault-card-icon status-icon">
+                <i class="fa-solid fa-shield-halved"></i>
               </div>
+              <div>
+                <h3>Tokens Ativos</h3>
+                <p>Serviços configurados e protegidos</p>
+              </div>
+              <button class="vault-refresh-btn" id="btn-refresh-vault" title="Atualizar">
+                <i class="fa-solid fa-arrows-rotate"></i>
+              </button>
+            </div>
+
+            <!-- TOKENS GRID -->
+            <div id="vault-keys-list" class="vault-keys-grid">
+              <div class="vault-loading">
+                <i class="fa-solid fa-spinner fa-spin"></i>
+                <span>Carregando tokens...</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- BOTTOM: CONNECTORS STATUS -->
+        <div class="vault-connectors-section">
+          <div class="vault-card-header" style="margin-bottom: 20px;">
+            <div class="vault-card-icon connector-icon">
+              <i class="fa-solid fa-plug-circle-bolt"></i>
+            </div>
+            <div>
+              <h3>Conectores Ativos</h3>
+              <p>Integrações em execução na VPS</p>
+            </div>
+          </div>
+          <div id="connectors-list" class="connectors-grid">
+            <div class="vault-loading">
+              <i class="fa-solid fa-spinner fa-spin"></i>
+              <span>Verificando conectores...</span>
             </div>
           </div>
         </div>

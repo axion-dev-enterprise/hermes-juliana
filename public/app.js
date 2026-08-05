@@ -631,48 +631,84 @@ document.addEventListener('DOMContentLoaded', () => {
   async function loadVaultKeys() {
     const container = document.getElementById('vault-keys-list');
     if (!container) return;
+    container.innerHTML = `<div class="vault-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Carregando tokens...</span></div>`;
+
+    const SERVICE_ICONS = {
+      nous_portal: '⚡', openrouter: '🔀', openai: '🤖', anthropic: '🧠', gemini: '✨', groq: '⚡',
+      perplexity: '🔍', mistral: '🌊', elevenlabs: '🎙️', google_workspace: '📦', google_oauth: '🔑',
+      google_sheets: '📊', google_drive: '🗂️', google_calendar: '📅', google_gmail: '📧',
+      google_ads: '📣', google_analytics: '📈', firebase: '🔥', meta_graph: '🌐', meta_ads: '📣',
+      meta_whatsapp: '💬', meta_instagram: '📸', meta_pixel: '🎯', whatsapp: '💬', telegram: '✈️',
+      slack: '💼', discord: '🎮', twilio: '📱', sendgrid: '📧', mailchimp: '🐵', brevo: '💌',
+      asaas: '💰', stripe: '💳', mercadopago: '💵', pagarme: '💲', iugu: '🏦', gerencianet: '🏧',
+      clickup: '✅', notion: '📝', trello: '📋', jira: '🗂️', hubspot: '🧲', pipedrive: '📊',
+      rdstation: '📡', salesforce: '☁️', github: '🐙', vercel: '▲', cloudflare: '🟠', aws: '☁️',
+      gcp_sa: '🔵', azure: '🟦', supabase: '⚡', railway: '🚂', sentry: '🛡️',
+      semrush: '🔍', ahrefs: '📊', hotjar: '🔥', mixpanel: '📱', amplitude: '📈',
+      openweather: '🌤️', maps: '🗺️', shopify: '🛒', woocommerce: '🛍️', n8n: '⚙️',
+      zapier: '⚡', make: '🔧', custom: '🔗',
+    };
 
     try {
       const res = await fetch('/api/v1/vault/keys');
-      if (!res.ok) throw new Error('Erro ao carregar chaves do Vault');
+      if (!res.ok) throw new Error('Erro ao carregar Vault');
       const data = await res.json();
       const keys = data.keys || data;
 
+      // Update hero stats
+      const countEl = document.getElementById('vault-count-total');
+      const svcsEl = document.getElementById('vault-count-services');
+      if (countEl) countEl.textContent = Array.isArray(keys) ? keys.length : 0;
+      if (svcsEl) svcsEl.textContent = Array.isArray(keys) ? new Set(keys.map(k => (k.service || '').split('_')[0])).size : 0;
+
       if (!Array.isArray(keys) || keys.length === 0) {
-        container.innerHTML = `<div class="vault-empty">Nenhuma chave cadastrada no Vault.</div>`;
+        container.innerHTML = `<div class="vault-empty"><i class="fa-solid fa-vault"></i><span>Nenhuma credencial no Vault.<br>Adicione sua primeira chave ao lado.</span></div>`;
         return;
       }
 
-      let html = '';
-      keys.forEach(k => {
-        const isConfigured = k.status === 'CONFIGURED' || k.configured;
-        const statusClass = isConfigured ? 'connected' : 'offline';
-        const statusLabel = isConfigured ? 'ATIVO' : 'PENDENTE';
-
-        html += `
-          <div class="connector-item">
-            <div class="connector-left">
-              <svg class="svg-icon text-amber"><use href="#icon-vault"/></svg>
-              <div class="connector-info">
-                <span class="connector-name">${escapeHtml(k.service || k.name)}</span>
-                <span class="connector-detail">Token: ${escapeHtml(k.maskedToken || '••••••••')}</span>
-              </div>
+      container.innerHTML = keys.map(k => {
+        const svc = k.service || k.name || 'custom';
+        const icon = SERVICE_ICONS[svc] || '🔑';
+        const isActive = k.status === 'CONFIGURED' || k.configured;
+        const badge = isActive ? 'active' : 'configured';
+        const label = isActive ? 'ATIVO' : 'CONFIGURADO';
+        return `<div class="vault-item">
+          <div class="vault-item-left">
+            <div class="vault-item-icon">${icon}</div>
+            <div class="vault-item-info">
+              <span class="vault-item-name">${escapeHtml(svc.replace(/_/g, ' ').toUpperCase())}</span>
+              <span class="vault-item-key">${escapeHtml(k.maskedToken || '••••••••••••')}</span>
             </div>
-            <span class="connector-status ${statusClass}">${statusLabel}</span>
           </div>
-        `;
-      });
-      container.innerHTML = html;
+          <span class="vault-item-status ${badge}">${label}</span>
+        </div>`;
+      }).join('');
     } catch (err) {
-      console.warn('[Vault] Usando erro ao carregar Vault:', err);
+      container.innerHTML = `<div class="vault-empty"><i class="fa-solid fa-triangle-exclamation"></i><span>Erro ao carregar Vault</span></div>`;
     }
   }
+
+  // Vault search filter
+  document.addEventListener('input', (e) => {
+    if (e.target.id === 'vault-service-search') {
+      const q = e.target.value.toLowerCase();
+      const select = document.getElementById('vault-service-select');
+      if (!select) return;
+      Array.from(select.options).forEach(opt => {
+        if (opt.value === '') return;
+        opt.hidden = q ? !(opt.text.toLowerCase().includes(q) || opt.value.toLowerCase().includes(q)) : false;
+      });
+    }
+  });
 
   async function saveVaultKey(service, token) {
     if (!service || !token) {
       alert('Por favor selecione um serviço e digite o Token API.');
       return;
     }
+    const btn = document.getElementById('btn-save-vault-key');
+    const hint = document.getElementById('vault-token-hint');
+    if (btn) { btn.disabled = true; btn.querySelector('span').textContent = 'Salvando...'; }
 
     try {
       const res = await fetch('/api/v1/vault', {
@@ -681,13 +717,16 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({ service, token })
       });
       if (!res.ok) throw new Error('Falha ao salvar no Vault');
-      alert(`Chave de API do serviço [${service}] gravada com sucesso no Vault AES-256!`);
+      if (hint) { hint.textContent = `✅ ${service} salvo com sucesso!`; hint.style.color = 'var(--green)'; }
       loadVaultKeys();
       loadConnectorsStatus();
     } catch (err) {
-      alert(`Chave salva no Vault: ${err.message}`);
+      if (hint) { hint.textContent = `⚠️ ${err.message}`; hint.style.color = 'var(--amber)'; }
       loadVaultKeys();
       loadConnectorsStatus();
+    } finally {
+      if (btn) { btn.disabled = false; btn.querySelector('span').textContent = 'Salvar no Vault com AES-256'; }
+      setTimeout(() => { if (hint) hint.textContent = ''; }, 4000);
     }
   }
 
@@ -1059,6 +1098,28 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
+      // Toggle visibilidade do token
+      const btnToggleVis = e.target.closest('#vault-toggle-vis');
+      if (btnToggleVis) {
+        const input = document.getElementById('vault-token-input');
+        const icon = document.getElementById('vault-eye-icon');
+        if (input && icon) {
+          const isHidden = input.type === 'password';
+          input.type = isHidden ? 'text' : 'password';
+          icon.className = isHidden ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+        }
+        return;
+      }
+
+      // Refresh vault list
+      const btnRefreshVault = e.target.closest('#btn-refresh-vault');
+      if (btnRefreshVault) {
+        const icon = btnRefreshVault.querySelector('i');
+        if (icon) { icon.style.transform = 'rotate(360deg)'; icon.style.transition = 'transform .6s'; setTimeout(() => { icon.style.transform = ''; }, 700); }
+        loadVaultKeys();
+        return;
+      }
+
       // Salvar Chave no Vault
       const btnSaveVault = e.target.closest('#btn-save-vault-key');
       if (btnSaveVault) {
@@ -1067,6 +1128,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (serviceSelect && tokenInput) {
           saveVaultKey(serviceSelect.value, tokenInput.value);
           tokenInput.value = '';
+          document.getElementById('vault-eye-icon')?.setAttribute('class', 'fa-solid fa-eye');
+          tokenInput.type = 'password';
         }
         return;
       }
