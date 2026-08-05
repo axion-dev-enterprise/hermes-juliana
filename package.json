@@ -1,6 +1,6 @@
 {
   "name": "hermes-gateway-juliana",
-  "version": "5.0.1",
+  "version": "5.1.0",
   "description": "Hermes Central Gateway & Executive Assistant Engine for Juliana (W Soluções Tecnologia)",
   "main": "server.js",
   "scripts": {

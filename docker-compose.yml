@@ -3,7 +3,7 @@ version: '3.8'
 services:
   hermes-gateway-juliana:
     build: .
-    image: hermes-gateway-juliana:v5.0.1
+    image: hermes-gateway-juliana:v5.1.0
     container_name: hermes-gateway-juliana
     restart: always
     ports:
@@ -13,7 +13,9 @@ services:
       - PORT=8000
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
-      - POSTGRES_URL=${POSTGRES_URL:-postgres://hermes:AXIONHermes2026Secure!@postgres:5432/hermes_db}
+      - POSTGRES_URL=${POSTGRES_URL:?POSTGRES_URL is required}
+      - HERMES_OPERATOR_TOKEN=${HERMES_OPERATOR_TOKEN:-}
+      - HERMES_TEST_MODE=${HERMES_TEST_MODE:-false}
     volumes:
       - ./docs:/app/docs
       - ./lib:/app/lib
@@ -31,7 +33,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.webchat
-    image: hermes-webchat:v5.0.1
+    image: hermes-webchat:v5.1.0
     container_name: hermes-webchat
     restart: always
     ports:

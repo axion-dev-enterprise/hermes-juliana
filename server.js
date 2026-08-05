@@ -6,6 +6,7 @@ const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { SYSTEM_PROMPT, MODES } = require('./prompts/juliana_system_prompt');
 const { loadConnectorDocs } = require('./lib/connector_helpers');
+const { TOOL_DEFINITIONS, executeAutonomyAction } = require('./lib/autonomy_engine');
 const integrationsKb = require('./lib/integrations_kb.json');
 
 const app = express();
@@ -14,8 +15,19 @@ const PORT = process.env.PORT || 8000;
 const STARTED_AT = Date.now();
 
 const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL || 'postgres://hermes:AXIONHermes2026Secure!@postgres:5432/hermes_db'
+  connectionString: process.env.POSTGRES_URL
 });
+
+const TEST_AUTONOMY_ENABLED = process.env.HERMES_TEST_MODE === 'true';
+
+function requireAutonomyAuthorization(req, res, next) {
+  if (TEST_AUTONOMY_ENABLED) return next();
+  const configuredToken = process.env.HERMES_OPERATOR_TOKEN;
+  const suppliedToken = req.get('X-Hermes-Operator-Token');
+  if (!configuredToken) return res.status(503).json({ error: 'Autonomia indisponível até configurar HERMES_OPERATOR_TOKEN.' });
+  if (suppliedToken !== configuredToken) return res.status(401).json({ error: 'Autorização administrativa inválida.' });
+  return next();
+}
 
 // AUTO-CREATE V5.0 DATABASE TABLES
 async function initDatabaseTables() {
@@ -270,7 +282,7 @@ app.get('/api/v1/health', async (req, res) => {
   res.json({
     status: 'ONLINE',
     system: 'HERMES_CENTRAL_JULIANA',
-    version: '5.0.1',
+    version: '5.1.0',
     timestamp: new Date().toISOString(),
     services: {
       postgresql: dbStatus,
@@ -350,7 +362,7 @@ app.get('/healthz', async (req, res) => {
   const body = {
     status,
     system: 'HERMES_CENTRAL_JULIANA',
-    version: '5.0.1',
+    version: '5.1.0',
     uptime_seconds: Math.round((Date.now() - STARTED_AT) / 1000),
     timestamp: new Date().toISOString(),
     checks,
@@ -382,6 +394,13 @@ app.post('/api/v1/auth/login', loginRateLimiter, (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
+  }
+
+  if (!TEST_AUTONOMY_ENABLED && !process.env.HERMES_OPERATOR_TOKEN) {
+    return res.status(503).json({ error: 'Login administrativo indisponível até configurar HERMES_OPERATOR_TOKEN.' });
+  }
+  if (!TEST_AUTONOMY_ENABLED && password !== process.env.HERMES_OPERATOR_TOKEN) {
+    return res.status(401).json({ error: 'Credenciais inválidas.' });
   }
 
   res.json({
@@ -459,22 +478,14 @@ app.post('/api/v1/agent/blackboard', async (req, res) => {
   }
 });
 
-// 1-CLICK EXECUTIVE ACTION CONFIRMATION ENDPOINT (ISSUE #12)
-app.post('/api/v1/agent/actions/confirm', async (req, res) => {
+// EXECUTIVE AUTONOMY ENDPOINT — real provider calls only; test mode is explicit.
+app.post('/api/v1/agent/actions/confirm', requireAutonomyAuthorization, async (req, res) => {
   const { actionType, params } = req.body;
   if (!actionType) return res.status(400).json({ error: 'actionType é obrigatório.' });
 
-  let receipt = { actionType, params, timestamp: new Date().toISOString(), status: 'EXECUTED' };
+  let receipt = { actionType, params, timestamp: new Date().toISOString(), status: 'EXECUTED', testMode: TEST_AUTONOMY_ENABLED };
   try {
-    if (actionType === 'UPDATE_META_ADS_BUDGET') {
-      receipt.details = `Orçamento da campanha Meta Ads [${params.campaignId || 'ACT_818273'}] atualizado para R$ ${params.budget || '500,00'}/dia via Graph API v19.0.`;
-    } else if (actionType === 'CREATE_ASAAS_CHARGE') {
-      receipt.details = `Cobrança PIX/Boleto Asaas criada para cliente [${params.customer || 'cus_000005011018'}] no valor de R$ ${params.value || '150,00'}. ID: pay_${Date.now()}`;
-    } else if (actionType === 'CREATE_CLICKUP_TASK') {
-      receipt.details = `Tarefa ClickUp [${params.taskName || 'Nova Tarefa'}] criada no workspace W Soluções.`;
-    } else {
-      receipt.details = `Ação executiva [${actionType}] processada com sucesso no ambiente de produção.`;
-    }
+    receipt.result = await executeAutonomyAction(actionType, params, await getRealVaultKeys());
 
     await pool.query(`
       INSERT INTO executive_action_receipts (action_type, params_json, receipt_json, status, executed_at)
@@ -486,6 +497,10 @@ app.post('/api/v1/agent/actions/confirm', async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+app.get('/api/v1/agent/autonomy/tools', requireAutonomyAuthorization, (req, res) => {
+  res.json({ status: 'success', testMode: TEST_AUTONOMY_ENABLED, tools: TOOL_DEFINITIONS });
 });
 
 // INTEGRATIONS KB ENDPOINT
@@ -989,6 +1004,22 @@ async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
   throw new Error('Resposta sem conteúdo da OpenRouter API');
 }
 
+async function callLLMWithTools(modelName, messages, maxTokens, tools) {
+  const keys = await getRealVaultKeys();
+  const openrouterVaultKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
+  const apiKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey;
+  if (!apiKey) throw new Error('OpenRouter não configurado no Vault.');
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://juliana.axionenterprise.cloud/', 'X-Title': 'Hermes Central Juliana' },
+    body: JSON.stringify({ model: modelName, max_tokens: maxTokens || 1200, messages, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) })
+  });
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+  const data = await response.json();
+  if (!data.choices?.[0]?.message) throw new Error('Resposta sem mensagem da OpenRouter API.');
+  return data.choices[0].message;
+}
+
 // MODULE-LEVEL CONTEXT BUILDER — builds the full live system prompt with real DB data
 async function buildFullSystemPrompt(mode, extraContext) {
   const realKeys = await getRealVaultKeys();
@@ -1163,6 +1194,8 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const realKeys = await getRealVaultKeys();
   const openrouterVaultKey = (realKeys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
   const apiKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey;
+  const suppliedOperatorToken = req.get('X-Hermes-Operator-Token');
+  const autonomyAuthorized = TEST_AUTONOMY_ENABLED || (process.env.HERMES_OPERATOR_TOKEN && suppliedOperatorToken === process.env.HERMES_OPERATOR_TOKEN);
 
   let responseText = '';
   let modelUsed = 'openai/gpt-4o-mini';
@@ -1184,7 +1217,7 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary}`);
 
   // 1. Execute Real Actions if commanded by Juliana
-  const executedActionsResult = await executeExecutiveActionMandate(fullPromptMessage);
+  const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
 
   const numericSessionId = parseInt(sessionId, 10);
   if (!isNaN(numericSessionId)) {
@@ -1267,7 +1300,22 @@ ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Do
   const fullSystemPrompt = `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
 
   const callOpenRouter = async (modelName) => {
-    return callLLM(modelName, fullSystemPrompt, fullPromptMessage, routing.complexity === 'HEAVY' ? 2000 : 1200);
+    const messages = [{ role: 'system', content: fullSystemPrompt }, { role: 'user', content: fullPromptMessage }];
+    let message = await callLLMWithTools(modelName, messages, routing.complexity === 'HEAVY' ? 2000 : 1200, autonomyAuthorized ? TOOL_DEFINITIONS : []);
+    for (let turn = 0; turn < 3 && Array.isArray(message.tool_calls) && message.tool_calls.length; turn += 1) {
+      messages.push(message);
+      for (const toolCall of message.tool_calls) {
+        let result;
+        try {
+          result = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), realKeys);
+        } catch (toolError) {
+          result = { error: toolError.message };
+        }
+        messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
+      }
+      message = await callLLMWithTools(modelName, messages, routing.complexity === 'HEAVY' ? 2000 : 1200, autonomyAuthorized ? TOOL_DEFINITIONS : []);
+    }
+    return message.content || 'Ação processada; consulte o histórico executivo para o recibo.';
   };
 
   try {
