@@ -137,6 +137,6 @@ test('Hermes Juliana - E2E Integration Suite', async (t) => {
     assert.strictEqual(res.status, 200);
     const html = await res.text();
     assert.ok(html.includes('<title>Hermes Central | W Soluções Tecnologia</title>'));
-    assert.ok(html.includes('app.js?v=5.2.0'));
+    assert.ok(html.includes('app.js?v=6.0.0'));
   });
 });
