@@ -11,6 +11,7 @@ const integrationsKb = require('./lib/integrations_kb.json');
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 8000;
+const STARTED_AT = Date.now();
 
 const pool = new Pool({
   connectionString: process.env.POSTGRES_URL || 'postgres://hermes:AXIONHermes2026Secure!@postgres:5432/hermes_db'
@@ -269,7 +270,7 @@ app.get('/api/v1/health', async (req, res) => {
   res.json({
     status: 'ONLINE',
     system: 'HERMES_CENTRAL_JULIANA',
-    version: '4.2.6',
+    version: '5.0.1',
     timestamp: new Date().toISOString(),
     services: {
       postgresql: dbStatus,
@@ -278,6 +279,102 @@ app.get('/api/v1/health', async (req, res) => {
       websocket: wss.clients.size > 0 ? 'ACTIVE' : 'STANDBY'
     }
   });
+});
+
+// -------------------------------------------------------------
+// DEEP HEALTHCHECK — /healthz (v5.0.1)
+// Purpose: origin healthcheck usado pelo Nginx e Cloudflare.
+// Retorna 200 somente se TODOS os checks passam; 503 com
+// detalhe de qual check falhou. Cache-Control: no-store.
+// -------------------------------------------------------------
+const _redisCheck = () => new Promise(async (resolve) => {
+  try {
+    const Redis = require('ioredis');
+    const rc = new Redis(process.env.REDIS_URL || 'redis://redis:6379', {
+      connectTimeout: 1200,
+      maxRetriesPerRequest: 1,
+      lazyConnect: true
+    });
+    await rc.connect();
+    const pong = await rc.ping();
+    rc.disconnect();
+    resolve(pong === 'PONG' ? 'ok' : 'unexpected');
+  } catch (e) {
+    resolve('fail: ' + (e && e.message ? e.message : 'unknown'));
+  }
+});
+
+const _openrouterCheck = () => new Promise((resolve) => {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) return resolve('no-key');
+  const https = require('https');
+  const req = https.request({
+    method: 'GET',
+    hostname: 'openrouter.ai',
+    path: '/api/v1/auth/key',
+    headers: { 'Authorization': 'Bearer ' + key },
+    timeout: 1200
+  }, (r) => {
+    r.resume();
+    resolve(r.statusCode && r.statusCode < 500 ? 'ok' : ('http-' + r.statusCode));
+  });
+  req.on('timeout', () => { req.destroy(new Error('timeout')); });
+  req.on('error', (e) => resolve('fail: ' + (e.message || 'unknown')));
+  req.end();
+});
+
+app.get('/healthz', async (req, res) => {
+  const startedAt = Date.now();
+  const checks = { postgres: 'pending', redis: 'pending', openrouter: 'pending', ws: 'pending' };
+
+  // Postgres (SELECT 1) com timeout duro de 1.2s
+  const pgTimeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 1200));
+  checks.postgres = await Promise.race([
+    pool.query('SELECT 1').then(() => 'ok').catch((e) => 'fail: ' + e.message),
+    pgTimeout
+  ]);
+
+  // Redis (PING)
+  checks.redis = await _redisCheck();
+
+  // OpenRouter (HEAD /api/v1/auth/key)
+  checks.openrouter = await _openrouterCheck();
+
+  // WebSocket server
+  checks.ws = (server.listening && wss) ? 'ok' : 'down';
+
+  const allOk = Object.values(checks).every((v) => v === 'ok' || v === 'STANDBY' || v === 'ACTIVE');
+  const status = allOk ? 'ok' : 'degraded';
+  const httpCode = allOk ? 200 : 503;
+
+  const body = {
+    status,
+    system: 'HERMES_CENTRAL_JULIANA',
+    version: '5.0.1',
+    uptime_seconds: Math.round((Date.now() - STARTED_AT) / 1000),
+    timestamp: new Date().toISOString(),
+    checks,
+    response_ms: Date.now() - startedAt
+  };
+
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.status(httpCode).json(body);
+
+  // Audit log on non-ok
+  if (!allOk) {
+    console.warn('[HEALTHZ DEGRADED]', JSON.stringify(body));
+    try {
+      const fs = require('fs');
+      const path = require('path');
+      const day = new Date().toISOString().slice(0, 10);
+      const dir = path.join(process.env.HERMES_AUDIT_DIR || '/app/HISTORY/audit');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.appendFileSync(
+        path.join(dir, `hermes-healthz-${day}.log`),
+        JSON.stringify({ ts: body.timestamp, code: httpCode, body }) + '\n'
+      );
+    } catch (_) { /* audit best-effort */ }
+  }
 });
 
 // AUTHENTICATION LOGIN (WITH RATE LIMITER & RBAC TOKEN)

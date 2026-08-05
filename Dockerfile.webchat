@@ -1,0 +1,16 @@
+FROM nginx:alpine
+LABEL maintainer="AXION Enterprise <axionenterprise777@gmail.com>"
+LABEL version="5.0.1"
+
+# SPA estática
+COPY public /usr/share/nginx/html
+
+# Configuração com bypass de cache 5xx + no-store em /healthz
+COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+COPY nginx/50x.html /usr/share/nginx/html/50x.html
+
+EXPOSE 80
+HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
+  CMD wget -qO- http://127.0.0.1/healthz || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

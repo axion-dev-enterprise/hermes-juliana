@@ -1,7 +1,7 @@
 {
   "name": "hermes-juliana",
-  "version": "4.2.6",
-  "build_timestamp": "2026-08-04T21:28:00-03:00",
+  "version": "5.0.1",
+  "build_timestamp": "2026-08-05T13:25:00-03:00",
   "environment": "production",
   "domain": "https://juliana.axionenterprise.cloud/",
   "vps_ip": "179.197.237.20",
@@ -17,7 +17,10 @@
     "Executive Action Execution Engine (Intent Detection & Real SQL / ClickUp API v2 Mutations)",
     "Authoritative Connector API Documentation (docs/CONNECTORS_DOCUMENTATION_AND_PROCEDURES.md)",
     "Connector Helper Utilities (lib/connector_helpers.js)",
-    "Empirical Production Benchmark Suite (28/29 Passed)"
+    "Empirical Production Benchmark Suite (28/29 Passed)",
+    "Deep /healthz endpoint (Postgres + Redis + OpenRouter + WS) with 503 on degraded",
+    "Nginx hermes-webchat: bypass 5xx caching, no-store on /healthz and /api, 50x branded page",
+    "Cloudflare Cache Bypass rules for /healthz, audit log of every degraded health response"
   ],
   "author": "AXION Enterprise <axionenterprise777@gmail.com>"
 }
