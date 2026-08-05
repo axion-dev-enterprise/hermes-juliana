@@ -136,11 +136,11 @@ app.get('/api/v1/health', async (req, res) => {
 
   let redisStatus = 'UNKNOWN';
   try {
-    const { createClient } = require('redis');
-    const rc = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
+    const Redis = require('ioredis');
+    const rc = new Redis(process.env.REDIS_URL || 'redis://redis:6379', { connectTimeout: 2000, lazyConnect: true });
     await rc.connect();
     await rc.ping();
-    await rc.disconnect();
+    rc.disconnect();
     redisStatus = 'CONNECTED';
   } catch {
     redisStatus = 'DISCONNECTED';
