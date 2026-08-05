@@ -39,10 +39,7 @@ async function getRealVaultKeys() {
     });
   } catch (err) {
     console.warn('[DB VAULT WARN]:', err.message);
-    return [
-      { service: 'ClickUp (Projetos)', name: 'CLICKUP API', maskedToken: 'pk_2785...****', status: 'CONFIGURED', configured: true, rawToken: process.env.CLICKUP_API_KEY || '' },
-      { service: 'OpenRouter (LLM)', name: 'OPENROUTER API', maskedToken: 'sk-or-v1...****', status: 'CONFIGURED', configured: true, rawToken: process.env.OPENROUTER_API_KEY || '' }
-    ];
+    return [];
   }
 }
 
@@ -52,7 +49,8 @@ async function fetchRealClickUpTasks() {
     const clickupKeyObj = keys.find(k => k.service.toLowerCase().includes('clickup'));
     const token = clickupKeyObj ? clickupKeyObj.rawToken : process.env.CLICKUP_API_KEY;
 
-    const res = await fetch('https://api.clickup.com/api/v2/team/90133016156/task?include_closed=true', {
+    const teamId = process.env.CLICKUP_TEAM_ID || '90133016156';
+    const res = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/task?include_closed=true`, {
       headers: { 'Authorization': token }
     });
     if (!res.ok) return null;
@@ -72,36 +70,17 @@ async function fetchRealClickUpTasks() {
   }
 }
 
-// IN-MEMORY DATA STORES
-let sessionsStore = [
-  {
-    id: 'session-1',
-    title: 'Atendimento Executivo Grupo W',
-    updatedAt: new Date(Date.now() - 3600000).toISOString(),
-    messageCount: 12,
-    archived: false
-  },
-  {
-    id: 'session-2',
-    title: 'Integração Asaas & ClickUp',
-    updatedAt: new Date(Date.now() - 86400000).toISOString(),
-    messageCount: 8,
-    archived: false
-  }
-];
+// IN-MEMORY FALLBACK STORES (empty — real data always comes from PostgreSQL)
+let sessionsStore = [];
+let crmLeadsStore = [];
 
-let crmLeadsStore = [
-  { id: 'lead-1', name: 'Juliana W Soluções', company: 'Grupo W Tecnologia', value: 'R$ 45.000,00', stage: 'reuniao_agendada' },
-  { id: 'lead-2', name: 'Carlos Eduardo', company: 'Sensix E-commerce', value: 'R$ 18.500,00', stage: 'proposta_enviada' },
-  { id: 'lead-3', name: 'Roberto Lima', company: 'Banco Inter Corp', value: 'R$ 120.000,00', stage: 'lead_recebido' },
-  { id: 'lead-4', name: 'Ana Paula Costa', company: 'Venshop Varejo', value: 'R$ 65.000,00', stage: 'fechado_ganho' }
-];
-
+// In-memory status cache — all values initialised as disconnected/unknown
+// Real values are populated via Baileys Keeper (WhatsApp) and DB (others)
 let connectorsStatusStore = {
-  whatsapp: { connected: true, phone: '+55 11 99999-8888', engine: 'Baileys v6.7.0' },
-  telegram: { connected: true, botName: '@HermesCentralBot' },
+  whatsapp: { connected: false, phone: null, engine: 'Baileys Multi-Device v6.7.0' },
+  telegram: { connected: false, botName: null },
   asaas: { connected: false, environment: 'Pendente' },
-  clickup: { connected: true, workspace: 'W Soluções Tecnologia LTDA' }
+  clickup: { connected: false, workspace: null }
 };
 
 // -------------------------------------------------------------
@@ -155,6 +134,18 @@ app.get('/api/v1/health', async (req, res) => {
     dbStatus = 'DISCONNECTED';
   }
 
+  let redisStatus = 'UNKNOWN';
+  try {
+    const { createClient } = require('redis');
+    const rc = createClient({ url: process.env.REDIS_URL || 'redis://redis:6379' });
+    await rc.connect();
+    await rc.ping();
+    await rc.disconnect();
+    redisStatus = 'CONNECTED';
+  } catch {
+    redisStatus = 'DISCONNECTED';
+  }
+
   res.json({
     status: 'ONLINE',
     system: 'HERMES_CENTRAL_JULIANA',
@@ -162,9 +153,9 @@ app.get('/api/v1/health', async (req, res) => {
     timestamp: new Date().toISOString(),
     services: {
       postgresql: dbStatus,
-      redis: 'CONNECTED',
+      redis: redisStatus,
       openrouter: 'ACTIVE',
-      websocket: 'ACTIVE'
+      websocket: wss.clients.size > 0 ? 'ACTIVE' : 'STANDBY'
     }
   });
 });
@@ -490,6 +481,23 @@ app.post('/api/v1/connectors/telegram/token', async (req, res) => {
   const { token } = req.body;
   if (!token) return res.status(400).json({ error: 'Token é obrigatório.' });
 
+  // Validate token against Telegram API before saving
+  let botName = null;
+  try {
+    const tgRes = await fetch(`https://api.telegram.org/bot${token}/getMe`);
+    if (!tgRes.ok) {
+      return res.status(400).json({ error: 'Token Telegram inválido. A API do Telegram rejeitou o token.' });
+    }
+    const tgData = await tgRes.json();
+    if (!tgData.ok) {
+      return res.status(400).json({ error: `Token Telegram inválido: ${tgData.description}` });
+    }
+    botName = `@${tgData.result.username}`;
+  } catch (err) {
+    console.warn('[TELEGRAM VALIDATE WARN]:', err.message);
+    return res.status(502).json({ error: 'Não foi possível validar o token com a API do Telegram.' });
+  }
+
   try {
     await pool.query(`
       INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
@@ -502,9 +510,9 @@ app.post('/api/v1/connectors/telegram/token', async (req, res) => {
   }
 
   connectorsStatusStore.telegram.connected = true;
-  connectorsStatusStore.telegram.botTokenMasked = `${token.substring(0, 5)}...`;
+  connectorsStatusStore.telegram.botName = botName;
 
-  res.json({ status: 'success', message: 'Token Telegram salvo no Vault real com sucesso.' });
+  res.json({ status: 'success', botName, message: `Token Telegram validado (${botName}) e salvo no Vault com sucesso.` });
 });
 
 // CRM ENDPOINTS (POSTGRESQL REAL DATA)
@@ -598,9 +606,15 @@ async function executeExecutiveActionMandate(message) {
       } catch (err) {}
       actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO ENGINE WHATSAPP]: Sessão do WhatsApp deslogada, tokens zerados no PostgreSQL e status redefinido para DESCONECTADO com sucesso.');
     } else if (msgLower.includes('reconectar') || msgLower.includes('restabelecer') || msgLower.includes('conectar')) {
-      connectorsStatusStore.whatsapp.connected = true;
-      connectorsStatusStore.whatsapp.phone = '+55 11 99128-4421';
-      actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO ENGINE WHATSAPP]: Sessão do WhatsApp reconectada e reativada com sucesso (+55 11 99128-4421).');
+      try {
+        await fetch(`${WHATSAPP_KEEPER_URL}/qrcode`, { method: 'POST' });
+        const waStatus = await getRealWhatsAppStatus();
+        connectorsStatusStore.whatsapp.connected = waStatus.connected;
+        connectorsStatusStore.whatsapp.phone = waStatus.phone;
+        actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO BAILEYS KEEPER]: Solicitação de reconexão enviada ao motor WhatsApp real. Status atual: ${waStatus.status || (waStatus.connected ? 'CONNECTED' : 'SCAN_REQUIRED')}.`);
+      } catch (err) {
+        actionsTaken.push(`⚠️ [KEEPER WHATSAPP WARN]: Não foi possível contatar o motor Baileys: ${err.message}`);
+      }
     }
   }
 
@@ -658,7 +672,8 @@ async function executeExecutiveActionMandate(message) {
       const keys = await getRealVaultKeys();
       const clickupKeyObj = keys.find(k => k.service.toLowerCase().includes('clickup'));
       const apiKey = clickupKeyObj ? clickupKeyObj.rawToken : process.env.CLICKUP_API_KEY;
-      const teamsRes = await fetch('https://api.clickup.com/api/v2/team/90133016156/space', {
+      const teamId = process.env.CLICKUP_TEAM_ID || '90133016156';
+      const teamsRes = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/space`, {
         headers: { 'Authorization': apiKey }
       });
       if (teamsRes.ok) {
@@ -735,9 +750,25 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const realClickUpTasks = await fetchRealClickUpTasks();
   const connectorDocsContext = loadConnectorDocs();
 
-  const vaultSummary = realKeys.map(k => `- ${k.service}: ${k.status} (${k.maskedToken})`).join('\n');
-  const crmSummary = crmLeadsStore.map(l => `- ${l.name} (${l.company}): ${l.value} [Etapa: ${l.stage}]`).join('\n');
-  const tasksContext = realClickUpTasks || '- [Otimização CP 01 SYVA] (Status: para otimizar | Resp: Augusto L. Santos)\n- [Otimização Tráfego Pago mimosfit] (Status: para otimizar | Resp: Augusto L. Santos)';
+  // Fetch real CRM leads from PostgreSQL for LLM context
+  let realCrmLeads = [];
+  try {
+    const crmRes = await pool.query('SELECT name, company, value, stage FROM clients_crm ORDER BY created_at DESC LIMIT 20');
+    realCrmLeads = crmRes.rows;
+  } catch (err) {
+    console.warn('[CRM CONTEXT FETCH WARN]:', err.message);
+  }
+
+  const vaultSummary = realKeys.length > 0
+    ? realKeys.map(k => `- ${k.service}: ${k.status} (${k.maskedToken})`).join('\n')
+    : '- Nenhuma chave configurada no Vault.';
+
+  const crmSummary = realCrmLeads.length > 0
+    ? realCrmLeads.map(l => `- ${l.name} (${l.company}): ${l.value} [Etapa: ${l.stage}]`).join('\n')
+    : '- Nenhum lead registrado no CRM.';
+
+  // Empty string fallback — never inject hardcoded fake tasks into the LLM
+  const tasksContext = realClickUpTasks || '- Nenhuma tarefa retornada pela ClickUp API no momento.';
 
   const actionsContext = executedActionsResult ? `\n\n### AÇÕES REAIS EXECUTADAS NO SISTEMA COM BASE NO COMANDO DA JULIANA:\n${executedActionsResult}\n` : '';
 
