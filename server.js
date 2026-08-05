@@ -462,15 +462,29 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
   }
 
   if (sender && message) {
+    console.log(`[WHATSAPP WEBHOOK] Routing message from ${pushName || sender} to Juliana LLM...`);
     try {
       const routing = selectOptimalModel(message, 'EXECUTIVE');
-      const dynamicContext = `\n\n### MENSAGEM RECEBIDA DO WHATSAPP DE ${pushName || sender} (${sender}):\nInstrução: Responda de forma concisa e executiva.`;
-      
-      const reply = await queryOpenRouterLLM(routing.primary, message, dynamicContext);
+      const whatsappCtx = `\n\n### MENSAGEM RECEBIDA VIA WHATSAPP:\n- Remetente: ${pushName || 'Contato WhatsApp'} (${sender})\n- Canal: WhatsApp\n- Instrução: Responda de forma profissional, concisa e representativa da W Soluções Tecnologia.`;
+      const fullPrompt = await buildFullSystemPrompt('EXECUTIVE', whatsappCtx);
+
+      let reply = null;
+      const modelsToTry = [routing.primary, ...routing.fallbacks];
+      for (const model of modelsToTry) {
+        try {
+          reply = await callLLM(model, fullPrompt, message, routing.complexity === 'HEAVY' ? 2000 : 1200);
+          console.log(`[WHATSAPP WEBHOOK] LLM replied via ${model}: ${reply.substring(0, 80)}...`);
+          break;
+        } catch (modelErr) {
+          console.warn(`[WHATSAPP WEBHOOK] Model ${model} failed:`, modelErr.message);
+        }
+      }
+
+      if (!reply) throw new Error('All LLM models failed');
       return res.json({ reply });
     } catch (err) {
       console.error('[WHATSAPP AGENT REPLY ERR]:', err.message);
-      return res.json({ reply: 'Olá! Sou a Juliana da W Soluções Tecnologia. Recebi sua mensagem e já estou processando.' });
+      return res.json({ reply: 'Olá! Sou a Juliana da W Soluções Tecnologia. No momento estou com instabilidade. Por favor, tente novamente em instantes.' });
     }
   }
 
@@ -578,6 +592,71 @@ function selectOptimalModel(promptText, mode) {
       complexity: 'MEDIUM'
     };
   }
+}
+
+// MODULE-LEVEL LLM CALLER — used by /agent/chat, /whatsapp/webhook, and any future connector
+async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
+  const keys = await getRealVaultKeys();
+  const openrouterVaultKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
+  const apiKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey;
+
+  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+      'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
+      'X-Title': 'Hermes Central Juliana'
+    },
+    body: JSON.stringify({
+      model: modelName,
+      max_tokens: maxTokens || 1200,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userMessage }
+      ]
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`HTTP ${response.status}: ${errText}`);
+  }
+
+  const data = await response.json();
+  if (data.choices?.[0]?.message?.content) return data.choices[0].message.content;
+  if (data.error?.message) throw new Error(`OpenRouter Error: ${data.error.message}`);
+  throw new Error('Resposta sem conteúdo da OpenRouter API');
+}
+
+// MODULE-LEVEL CONTEXT BUILDER — builds the full live system prompt with real DB data
+async function buildFullSystemPrompt(mode, extraContext) {
+  const realKeys = await getRealVaultKeys();
+  const realClickUpTasks = await fetchRealClickUpTasks();
+  const connectorDocsContext = loadConnectorDocs();
+
+  let realCrmLeads = [];
+  try {
+    const crmRes = await pool.query('SELECT name, company, value, stage FROM clients_crm ORDER BY created_at DESC LIMIT 20');
+    realCrmLeads = crmRes.rows;
+  } catch (err) {
+    console.warn('[CRM CONTEXT FETCH WARN]:', err.message);
+  }
+
+  const vaultSummary = realKeys.length > 0
+    ? realKeys.map(k => `- ${k.service}: ${k.status} (${k.maskedToken})`).join('\n')
+    : '- Nenhuma chave configurada no Vault.';
+
+  const crmSummary = realCrmLeads.length > 0
+    ? realCrmLeads.map(l => `- ${l.name} (${l.company}): ${l.value} [Etapa: ${l.stage}]`).join('\n')
+    : '- Nenhum lead registrado no CRM.';
+
+  const tasksContext = realClickUpTasks || '- Nenhuma tarefa retornada pela ClickUp API no momento.';
+
+  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (DADOS 100% REAIS):\n${extraContext || ''}\n[CHAVES E SERVIÇOS NO VAULT]:\n${vaultSummary}\n\n[TAREFAS REAIS NO CLICKUP]:\n${tasksContext}\n\n[PIPELINE E LEADS NO CRM]:\n${crmSummary}\n\n[DOCUMENTAÇÕES DOS CONECTORES]:\n${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Documentação técnica carregada.'}\n\n### INSTRUÇÕES OBRIGATÓRIAS:\n- NUNCA alucine ou invente dados fictícios.\n- Responda de forma executiva, objetiva e direta.\n- Quando falar com contatos externos via WhatsApp, seja profissional e representativa da W Soluções.`;
+
+  const modeInstruction = MODES?.[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${MODES[mode]}` : '';
+  return `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
 }
 
 // EXECUTIVE ACTION EXECUTION ENGINE (JULIANA ACTION MANDATES)
@@ -796,37 +875,7 @@ ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Do
   const fullSystemPrompt = `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
 
   const callOpenRouter = async (modelName) => {
-    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
-        'X-Title': 'Hermes Central Juliana'
-      },
-      body: JSON.stringify({
-        model: modelName,
-        max_tokens: routing.complexity === 'HEAVY' ? 2000 : 1200,
-        messages: [
-          { role: 'system', content: fullSystemPrompt },
-          { role: 'user', content: message }
-        ]
-      })
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`HTTP ${response.status}: ${errText}`);
-    }
-
-    const data = await response.json();
-    if (data.choices && data.choices.length > 0 && data.choices[0].message && data.choices[0].message.content) {
-      return data.choices[0].message.content;
-    }
-    if (data.error && data.error.message) {
-      throw new Error(`OpenRouter Error: ${data.error.message}`);
-    }
-    throw new Error('Resposta sem conteúdo da OpenRouter API');
+    return callLLM(modelName, fullSystemPrompt, message, routing.complexity === 'HEAVY' ? 2000 : 1200);
   };
 
   try {
