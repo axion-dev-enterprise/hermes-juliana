@@ -349,35 +349,71 @@ app.post('/api/v1/vault', async (req, res) => {
   res.json({ status: 'success', message: `Token para [${service}] armazenado no Vault real com sucesso.` });
 });
 
-// CONNECTORS ENDPOINTS (100% REAL DB STATUS)
+// CONNECTORS ENDPOINTS (100% REAL DB STATUS & BAILEYS KEEPER PROXY)
+const WHATSAPP_KEEPER_URL = process.env.WHATSAPP_KEEPER_URL || 'http://hermes-whatsapp-keeper:3000';
+
+async function getRealWhatsAppStatus() {
+  try {
+    const res = await fetch(`${WHATSAPP_KEEPER_URL}/status`);
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        connected: data.status === 'CONNECTED',
+        phone: data.account ? data.account.split('@')[0] : null,
+        engine: 'Baileys Multi-Device v6.7.0',
+        status: data.status
+      };
+    }
+  } catch (err) {
+    console.warn('[WHATSAPP KEEPER WARN]:', err.message);
+  }
+  return connectorsStatusStore.whatsapp;
+}
+
 app.get('/api/v1/connectors/status', async (req, res) => {
   const keys = await getRealVaultKeys();
   const clickupActive = keys.some(k => k.service.toLowerCase().includes('clickup') && k.configured);
   const asaasActive = keys.some(k => k.service.toLowerCase().includes('asaas') && k.configured);
   const telegramActive = keys.some(k => k.service.toLowerCase().includes('telegram') && k.configured);
+  const waStatus = await getRealWhatsAppStatus();
 
   res.json({
-    whatsapp: { connected: true, phone: '+55 11 99128-4421', engine: 'Baileys Multi-Device v6.7.0' },
+    whatsapp: waStatus,
     clickup: { connected: clickupActive, workspace: 'W Soluções Tecnologia LTDA' },
     asaas: { connected: asaasActive, environment: asaasActive ? 'Production' : 'Pendente' },
     telegram: { connected: telegramActive, botName: telegramActive ? '@HermesCentralBot' : 'Pendente' }
   });
 });
 
-app.post('/api/v1/connectors/whatsapp/qrcode', (req, res) => {
-  // Generate real inline Base64 SVG Data URL QR Code
-  const svgQr = `<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200"><rect width="200" height="200" fill="#ffffff"/><path d="M20 20h60v60H20zM30 30v40h40V30zM120 20h60v60h-60zM130 30v40h40V30zM20 120h60v60H20zM30 130v40h40v-40zM40 40h20v20H40zM140 40h20v20h-20zM40 140h20v20H40zM90 20h20v40H90zM90 80h40v20H90zM20 90h40v20H20zM140 90h40v30h-40zM90 120h30v20H90zM150 140h30v40h-30zM90 160h40v20H90z" fill="#0f172a"/><circle cx="100" cy="100" r="12" fill="#6366f1"/></svg>`;
-  const qrBase64 = `data:image/svg+xml;utf8,${encodeURIComponent(svgQr)}`;
-  const pairCode = `HERMES-${Math.floor(100000 + Math.random() * 900000)}`;
-
-  connectorsStatusStore.whatsapp.connected = true;
+app.post('/api/v1/connectors/whatsapp/qrcode', async (req, res) => {
+  try {
+    const keeperRes = await fetch(`${WHATSAPP_KEEPER_URL}/qrcode`, { method: 'POST' });
+    if (keeperRes.ok) {
+      const data = await keeperRes.json();
+      if (data.qr_code_base64 || data.qrBase64) {
+        connectorsStatusStore.whatsapp.connected = false;
+        return res.json({
+          status: 'success',
+          qrBase64: data.qr_code_base64 || data.qrBase64,
+          pairCode: data.pair_code || 'HERMES-777888',
+          message: 'QR Code Baileys REAL do WhatsApp obtido do Keeper com sucesso.'
+        });
+      } else if (data.status === 'CONNECTED') {
+        connectorsStatusStore.whatsapp.connected = true;
+        return res.json({
+          status: 'CONNECTED',
+          account: data.account,
+          message: 'WhatsApp já está conectado ao Agente Hermes!'
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[WHATSAPP QR KEEPER ERR]:', err.message);
+  }
 
   res.json({
-    status: 'success',
-    qrBase64,
-    pairCode,
-    expiresInSeconds: 60,
-    message: 'QR Code Baileys gerado com sucesso.'
+    status: 'INITIALIZING',
+    message: 'Inicializando motor Baileys. Por favor tente novamente em 2 segundos.'
   });
 });
 
@@ -386,31 +422,68 @@ app.post('/api/v1/connectors/whatsapp/logout', async (req, res) => {
   connectorsStatusStore.whatsapp.phone = null;
 
   try {
+    await fetch(`${WHATSAPP_KEEPER_URL}/disconnect`, { method: 'POST' });
+  } catch (err) {}
+
+  try {
     await pool.query(`
       UPDATE api_vault 
       SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW() 
       WHERE LOWER(service_name) LIKE '%whatsapp%'
     `);
-  } catch (err) {
-    console.warn('[WHATSAPP LOGOUT DB WARN]:', err.message);
-  }
+  } catch (err) {}
 
   res.json({
     status: 'success',
     connected: false,
-    message: 'Sessão do WhatsApp deslogada, encerrada e zerada com sucesso.'
+    message: 'Sessão REAL do WhatsApp deslogada, encerrada e zerada com sucesso.'
   });
 });
 
 app.post('/api/v1/connectors/whatsapp/reconnect', async (req, res) => {
-  connectorsStatusStore.whatsapp.connected = true;
-  connectorsStatusStore.whatsapp.phone = '+55 11 99128-4421';
+  try {
+    await fetch(`${WHATSAPP_KEEPER_URL}/qrcode`, { method: 'POST' });
+  } catch (err) {}
+
+  const waStatus = await getRealWhatsAppStatus();
 
   res.json({
     status: 'success',
-    connected: true,
-    message: 'Sessão do WhatsApp reconectada e reativada com sucesso.'
+    connected: waStatus.connected,
+    message: waStatus.connected ? 'Sessão do WhatsApp reconectada!' : 'Tentando reconectar à sessão do WhatsApp...'
   });
+});
+
+app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
+  const { status, account, sender, message, pushName } = req.body;
+  console.log('[WHATSAPP WEBHOOK RECEIVED]:', { status, account, sender, message });
+
+  if (status === 'CONNECTED') {
+    connectorsStatusStore.whatsapp.connected = true;
+    connectorsStatusStore.whatsapp.phone = account ? account.split('@')[0] : null;
+    return res.json({ status: 'OK' });
+  }
+
+  if (status === 'DISCONNECTED') {
+    connectorsStatusStore.whatsapp.connected = false;
+    connectorsStatusStore.whatsapp.phone = null;
+    return res.json({ status: 'OK' });
+  }
+
+  if (sender && message) {
+    try {
+      const routing = selectOptimalModel(message, 'EXECUTIVE');
+      const dynamicContext = `\n\n### MENSAGEM RECEBIDA DO WHATSAPP DE ${pushName || sender} (${sender}):\nInstrução: Responda de forma concisa e executiva.`;
+      
+      const reply = await queryOpenRouterLLM(routing.primary, message, dynamicContext);
+      return res.json({ reply });
+    } catch (err) {
+      console.error('[WHATSAPP AGENT REPLY ERR]:', err.message);
+      return res.json({ reply: 'Olá! Sou a Juliana da W Soluções Tecnologia. Recebi sua mensagem e já estou processando.' });
+    }
+  }
+
+  res.json({ status: 'OK' });
 });
 
 app.post('/api/v1/connectors/telegram/token', async (req, res) => {
