@@ -645,8 +645,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const qrImg = data.qrBase64 || data.qrcode;
         const pairCode = data.pairCode || 'HERMES-919216';
         box.innerHTML = `
-          <img src="${qrImg}" style="max-width: 180px; height: auto; border-radius: 8px; border: 2px solid var(--accent-primary);" alt="WhatsApp QR Code">
-          <div style="margin-top: 8px; font-size: 11px; font-weight: 700; color: var(--accent-primary);">Código de Pareamento: ${pairCode}</div>
+          <div style="background: #ffffff; padding: 12px; border-radius: 12px; display: inline-block; box-shadow: 0 8px 24px rgba(0,0,0,0.25);">
+            <img src="${qrImg}" style="width: 160px; height: 160px; display: block; border-radius: 6px;" alt="WhatsApp QR Code">
+          </div>
+          <div style="margin-top: 10px; padding: 6px 14px; background: rgba(99, 102, 241, 0.12); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 20px; font-size: 0.75rem; font-weight: 700; color: var(--accent-2); display: flex; align-items: center; gap: 6px;">
+            <i class="fa-solid fa-key"></i> Pareamento: <span style="color: var(--text-1); font-family: monospace; font-size: 0.85rem;">${pairCode}</span>
+          </div>
         `;
       } else {
         box.innerHTML = `<div style="color: var(--color-green); font-weight: 600;">✅ WhatsApp Conectado com Sucesso!</div>`;
