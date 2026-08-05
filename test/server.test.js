@@ -29,10 +29,23 @@ test('Hermes Juliana - Frontend Assets Presence', () => {
   const htmlContent = fs.readFileSync(htmlPath, 'utf8');
   assert.ok(htmlContent.includes('<svg style="display: none;">'), 'Inline SVG sprite must be present');
   assert.ok(htmlContent.includes('id="icon-history"'), 'History SVG icon symbol must be present');
+  assert.ok(htmlContent.includes('id="command-palette-modal"'), 'Command Palette modal must be present');
 
   const jsContent = fs.readFileSync(jsPath, 'utf8');
   assert.ok(jsContent.includes('data-tab'), 'Tab switching logic must be present');
   assert.ok(jsContent.includes('/api/v1/agent/chat'), 'Real Chat API endpoint call must be present');
   assert.ok(jsContent.includes('/api/v1/vault'), 'Real Vault API endpoint call must be present');
   assert.ok(jsContent.includes('/api/v1/crm/leads'), 'Real CRM API endpoint call must be present');
+  assert.ok(jsContent.includes('initCommandPalette'), 'Command Palette init function must be present');
+});
+
+test('Hermes Juliana V5.0 - Server Engine & API Endpoints Verification', () => {
+  const serverPath = path.join(__dirname, '../server.js');
+  const serverContent = fs.readFileSync(serverPath, 'utf8');
+
+  assert.ok(serverContent.includes('/api/v1/user/memories'), 'User memories API endpoint must exist');
+  assert.ok(serverContent.includes('/api/v1/agent/blackboard'), 'Shared Blackboard API endpoint must exist');
+  assert.ok(serverContent.includes('/api/v1/agent/actions/confirm'), 'Executive Action confirmation API endpoint must exist');
+  assert.ok(serverContent.includes('loginRateLimiter'), 'Login rate limiter middleware must exist');
+  assert.ok(serverContent.includes('compressSessionContext'), 'Sliding window context compressor must exist');
 });

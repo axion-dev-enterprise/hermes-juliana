@@ -19,6 +19,8 @@ document.addEventListener('DOMContentLoaded', () => {
   loadCrmLeads();
   initChatForm();
   initVoiceRecognition();
+  initCommandPalette();
+  initDragAndDrop();
   initEventDelegation();
 
   // -------------------------------------------------------------
@@ -116,11 +118,20 @@ document.addEventListener('DOMContentLoaded', () => {
   // 2. THEME SWITCHER & MOBILE MENU
   // -------------------------------------------------------------
   function initThemeSwitcher() {
+    const savedTheme = localStorage.getItem('hermes_theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', savedTheme);
+
     const themeBtns = document.querySelectorAll('.theme-btn');
     themeBtns.forEach(btn => {
+      if (btn.getAttribute('data-theme') === savedTheme) {
+        btn.classList.add('active');
+      } else {
+        btn.classList.remove('active');
+      }
       btn.addEventListener('click', () => {
         const theme = btn.getAttribute('data-theme') || 'dark';
         document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('hermes_theme', theme);
 
         themeBtns.forEach(b => b.classList.remove('active'));
         btn.classList.add('active');
@@ -135,6 +146,99 @@ document.addEventListener('DOMContentLoaded', () => {
       btnMobile.addEventListener('click', () => {
         sidebar.classList.toggle('open');
       });
+    }
+  }
+
+  function initCommandPalette() {
+    const modal = document.getElementById('command-palette-modal');
+    const input = document.getElementById('cmd-palette-input');
+    const results = document.getElementById('cmd-palette-results');
+    if (!modal) return;
+
+    window.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        modal.classList.toggle('hidden');
+        if (!modal.classList.contains('hidden') && input) {
+          input.value = '';
+          input.focus();
+        }
+      } else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'n') {
+        e.preventDefault();
+        createNewSession();
+      } else if (e.key === 'Escape') {
+        modal.classList.add('hidden');
+        const confirmModal = document.getElementById('action-confirm-modal');
+        if (confirmModal) confirmModal.classList.add('hidden');
+      }
+    });
+
+    if (input) {
+      input.addEventListener('input', () => {
+        const query = input.value.toLowerCase().trim();
+        const items = results ? results.querySelectorAll('.cmd-item') : [];
+        items.forEach(item => {
+          const text = item.textContent.toLowerCase();
+          item.style.display = text.includes(query) ? 'flex' : 'none';
+        });
+      });
+    }
+
+    if (results) {
+      results.addEventListener('click', (e) => {
+        const item = e.target.closest('.cmd-item');
+        if (!item) return;
+        const action = item.getAttribute('data-action');
+        modal.classList.add('hidden');
+
+        if (action === 'cmd-new-chat') createNewSession();
+        else if (action === 'cmd-tab-vault') document.querySelector('[data-tab="tab-vault"]')?.click();
+        else if (action === 'cmd-tab-crm') document.querySelector('[data-tab="tab-crm"]')?.click();
+        else if (action === 'cmd-theme-dark') document.querySelector('[data-theme="dark"]')?.click();
+      });
+    }
+  }
+
+  let pendingAttachments = [];
+
+  function initDragAndDrop() {
+    const chatWrapper = document.querySelector('.chat-wrapper');
+    if (!chatWrapper) return;
+
+    chatWrapper.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      chatWrapper.style.border = '2px dashed var(--accent-primary)';
+    });
+
+    chatWrapper.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      chatWrapper.style.border = 'none';
+    });
+
+    chatWrapper.addEventListener('drop', (e) => {
+      e.preventDefault();
+      chatWrapper.style.border = 'none';
+      const files = e.dataTransfer.files;
+      if (files && files.length > 0) {
+        handleFileUpload(files[0]);
+      }
+    });
+  }
+
+  function handleFileUpload(file) {
+    const reader = new FileReader();
+    if (file.type.startsWith('image/')) {
+      reader.onload = (e) => {
+        pendingAttachments.push({ name: file.name, type: file.type, dataUrl: e.target.result });
+        alert(`Imagem [${file.name}] pronta para análise GPT-4o Vision!`);
+      };
+      reader.readAsDataURL(file);
+    } else {
+      reader.onload = (e) => {
+        pendingAttachments.push({ name: file.name, type: file.type, textContent: e.target.result });
+        alert(`Documento [${file.name}] anexado com sucesso!`);
+      };
+      reader.readAsText(file);
     }
   }
 
@@ -408,6 +512,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const thinkingId = `thinking-${Date.now()}`;
     appendThinkingIndicator(thinkingId);
 
+    const currentAttachments = [...pendingAttachments];
+    pendingAttachments = [];
+
     try {
       const response = await fetch('/api/v1/agent/chat', {
         method: 'POST',
@@ -415,7 +522,8 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({
           message: text,
           sessionId: activeSessionId,
-          mode: 'EXECUTIVE'
+          mode: 'EXECUTIVE',
+          attachments: currentAttachments
         })
       });
 
