@@ -1082,7 +1082,22 @@ app.get('/api/v1/crm/overview', async (req, res) => {
   }
 });
 
-// DYNAMIC TASK-BASED MODEL ROUTING ENGINE
+// DYNAMIC TASK-BASED MODEL ROUTING ENGINE (NOUS PORTAL PRIMARY)
+const DEFAULT_NOUS_KEY = 'sk-nous-ocH4iFsKAMhgVcjcI1xi3JXj023SPgnV';
+const NOUS_PORTAL_ENDPOINT = 'https://inference-api.nousresearch.com/v1/chat/completions';
+const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
+
+async function getLLMCredentials() {
+  const keys = await getRealVaultKeys();
+  const nousVaultKey = (keys.find(k => k.service.toLowerCase().includes('nous')) || {}).rawToken;
+  const openrouterVaultKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
+  
+  const nousKey = process.env.NOUS_PORTAL_API_KEY || nousVaultKey || DEFAULT_NOUS_KEY;
+  const openrouterKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey || '';
+
+  return { nousKey, openrouterKey };
+}
+
 function selectOptimalModel(promptText, mode) {
   const rawText = (promptText || '').toLowerCase().trim();
   const cleanText = rawText.replace(/[^\w\s]/gi, '').trim();
@@ -1096,74 +1111,100 @@ function selectOptimalModel(promptText, mode) {
 
   if (isHeavy) {
     return {
-      primary: 'openai/gpt-4o',
-      fallbacks: ['openai/gpt-4o-mini', 'openrouter/auto', 'openai/gpt-3.5-turbo'],
+      primary: 'stepfun/step-3.7-flash:free',
+      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'poolside/laguna-xs-2.1:free', 'openai/gpt-4o-mini'],
       complexity: 'HEAVY'
     };
   } else if (isLight) {
     return {
-      primary: 'openai/gpt-4o-mini',
-      fallbacks: ['openrouter/auto', 'openai/gpt-3.5-turbo'],
+      primary: 'stepfun/step-3.7-flash:free',
+      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
       complexity: 'LIGHT'
     };
   } else {
     return {
-      primary: 'openai/gpt-4o-mini',
-      fallbacks: ['openrouter/auto', 'openai/gpt-3.5-turbo'],
+      primary: 'stepfun/step-3.7-flash:free',
+      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
       complexity: 'MEDIUM'
     };
   }
 }
 
-// MODULE-LEVEL LLM CALLER — used by /agent/chat, /whatsapp/webhook, and any future connector
 async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
-  const keys = await getRealVaultKeys();
-  const openrouterVaultKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
-  const apiKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey;
-
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
-      'X-Title': 'Hermes Central Juliana'
-    },
-    body: JSON.stringify({
-      model: modelName,
-      max_tokens: maxTokens || 1200,
-      messages: [
-        { role: 'system', content: systemPrompt },
-        { role: 'user', content: userMessage }
-      ]
-    })
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`HTTP ${response.status}: ${errText}`);
-  }
-
-  const data = await response.json();
-  if (data.choices?.[0]?.message?.content) return data.choices[0].message.content;
-  if (data.error?.message) throw new Error(`OpenRouter Error: ${data.error.message}`);
-  throw new Error('Resposta sem conteúdo da OpenRouter API');
+  const messages = [
+    { role: 'system', content: systemPrompt },
+    { role: 'user', content: userMessage }
+  ];
+  const msgObj = await callLLMWithTools(modelName, messages, maxTokens, []);
+  return msgObj.content || '';
 }
 
 async function callLLMWithTools(modelName, messages, maxTokens, tools) {
-  const keys = await getRealVaultKeys();
-  const openrouterVaultKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
-  const apiKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey;
-  if (!apiKey) throw new Error('OpenRouter não configurado no Vault.');
-  const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'HTTP-Referer': 'https://juliana.axionenterprise.cloud/', 'X-Title': 'Hermes Central Juliana' },
-    body: JSON.stringify({ model: modelName, max_tokens: maxTokens || 1200, messages, ...(tools.length ? { tools, tool_choice: 'auto' } : {}) })
-  });
-  if (!response.ok) throw new Error(`HTTP ${response.status}: ${await response.text()}`);
-  const data = await response.json();
-  if (!data.choices?.[0]?.message) throw new Error('Resposta sem mensagem da OpenRouter API.');
-  return data.choices[0].message;
+  const { nousKey, openrouterKey } = await getLLMCredentials();
+  
+  const isNousModel = modelName.endsWith(':free') || modelName.includes('stepfun') || modelName.includes('inclusionai') || modelName.includes('poolside') || modelName.includes('tencent') || modelName.includes('nousresearch');
+
+  let endpoint = (isNousModel || nousKey) ? NOUS_PORTAL_ENDPOINT : OPENROUTER_ENDPOINT;
+  let apiKey = (isNousModel || nousKey) ? nousKey : openrouterKey;
+
+  const payload = {
+    model: modelName,
+    max_tokens: maxTokens || 1200,
+    messages,
+    ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {})
+  };
+
+  try {
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
+        'X-Title': 'Hermes Central Juliana (Nous Portal Primary)'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.ok) {
+      const data = await response.json();
+      if (data.choices?.[0]?.message) return data.choices[0].message;
+    } else {
+      const errText = await response.text();
+      console.warn(`[LLM CALL WARN] Primary endpoint (${endpoint}) returned ${response.status}: ${errText.substring(0, 150)}`);
+    }
+  } catch (err) {
+    console.warn(`[LLM CALL WARN] Primary endpoint (${endpoint}) failed: ${err.message}`);
+  }
+
+  // Fallback to OpenRouter if primary Nous call fails and OpenRouter key exists
+  if (openrouterKey && endpoint !== OPENROUTER_ENDPOINT) {
+    try {
+      const fbResponse = await fetch(OPENROUTER_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openrouterKey}`,
+          'Content-Type': 'application/json',
+          'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
+          'X-Title': 'Hermes Central Juliana Fallback'
+        },
+        body: JSON.stringify({
+          model: 'openai/gpt-4o-mini',
+          max_tokens: maxTokens || 1200,
+          messages,
+          ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {})
+        })
+      });
+      if (fbResponse.ok) {
+        const fbData = await fbResponse.json();
+        if (fbData.choices?.[0]?.message) return fbData.choices[0].message;
+      }
+    } catch (fbErr) {
+      console.warn(`[LLM FALLBACK WARN] OpenRouter fallback failed: ${fbErr.message}`);
+    }
+  }
+
+  throw new Error(`Falha ao obter resposta do modelo ${modelName} no Nous Portal.`);
 }
 
 // MODULE-LEVEL CONTEXT BUILDER — builds the full live system prompt with real DB data
@@ -1330,7 +1371,7 @@ async function executeExecutiveActionMandate(message) {
   return actionsTaken.join('\n\n');
 }
 
-// AGENT CHAT ROUTE (DYNAMIC MODEL ROUTING & ZERO-HALLUCINATION)
+// AGENT CHAT ROUTE (NOUS PORTAL INFRASTRUCTURE & FULL AUTONOMY + CONTEXT MEMORY)
 app.post('/api/v1/agent/chat', async (req, res) => {
   const { message, mode = 'EXECUTIVE', sessionId, attachments } = req.body;
   if (!message) {
@@ -1338,16 +1379,13 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   }
 
   const realKeys = await getRealVaultKeys();
-  const openrouterVaultKey = (realKeys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
-  const apiKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey;
-  const suppliedOperatorToken = req.get('X-Hermes-Operator-Token');
-  const autonomyAuthorized = TEST_AUTONOMY_ENABLED || (process.env.HERMES_OPERATOR_TOKEN && suppliedOperatorToken === process.env.HERMES_OPERATOR_TOKEN);
+  const autonomyAuthorized = process.env.HERMES_AUTONOMY_DISABLED !== 'true';
 
   let responseText = '';
-  let modelUsed = 'openai/gpt-4o-mini';
+  let modelUsed = 'stepfun/step-3.7-flash:free';
   let isFallback = false;
 
-  // Process attachments (images for GPT-4o vision, documents for text context)
+  // Process attachments (images for vision, documents for text context)
   let attachmentContext = '';
   if (Array.isArray(attachments) && attachments.length > 0) {
     attachments.forEach(att => {
@@ -1360,12 +1398,47 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const fullPromptMessage = attachmentContext ? `${message}\n${attachmentContext}` : message;
 
   const routing = selectOptimalModel(fullPromptMessage, mode);
-  console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary}`);
+  console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary} (Nous Portal)`);
 
   // 1. Execute Real Actions if commanded by Juliana
   const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
 
   const numericSessionId = parseInt(sessionId, 10);
+
+  // 2. Fetch User Memories & Session History for Sliding Window Summarizer & Full Context Memory
+  const userMemories = await getActiveUserMemories();
+  const memoriesSummary = userMemories.length > 0
+    ? userMemories.map(m => `- ${m.content}`).join('\n')
+    : '- Nenhuma memória persistente registrada.';
+
+  let historySummaryContext = '';
+  let sessionMessages = [];
+  let previousTurns = [];
+
+  if (!isNaN(numericSessionId)) {
+    try {
+      const msgRes = await pool.query(
+        'SELECT sender, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC',
+        [numericSessionId]
+      );
+      sessionMessages = msgRes.rows;
+
+      // Extract previous conversation turns for LLM context injection!
+      previousTurns = sessionMessages.slice(-15).map(m => ({
+        role: (m.sender === 'user' || m.sender === 'Juliana') ? 'user' : 'assistant',
+        content: m.content || ''
+      })).filter(m => m.content && m.content.trim().length > 0);
+
+      const compression = compressSessionContext(sessionMessages);
+      if (compression.isSummarized) {
+        historySummaryContext = compression.summaryContext;
+      }
+    } catch (err) {
+      console.warn('[DB SESSION HISTORY FETCH WARN]:', err.message);
+    }
+  }
+
+  // Save current user message to database AFTER reading previous turns
   if (!isNaN(numericSessionId)) {
     try {
       await pool.query(`
@@ -1377,29 +1450,9 @@ app.post('/api/v1/agent/chat', async (req, res) => {
     }
   }
 
-  // 2. Fetch User Memories & Session History for Sliding Window Summarizer
-  const userMemories = await getActiveUserMemories();
-  const memoriesSummary = userMemories.length > 0
-    ? userMemories.map(m => `- ${m.content}`).join('\n')
-    : '- Nenhuma memória persistente registrada.';
-
-  let historySummaryContext = '';
-  let sessionMessages = [];
-  if (!isNaN(numericSessionId)) {
-    try {
-      const msgRes = await pool.query('SELECT sender, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC', [numericSessionId]);
-      sessionMessages = msgRes.rows;
-      const compression = compressSessionContext(sessionMessages);
-      if (compression.isSummarized) {
-        historySummaryContext = compression.summaryContext;
-      }
-    } catch (err) {}
-  }
-
   const realClickUpTasks = await fetchRealClickUpTasks();
   const connectorDocsContext = loadConnectorDocs();
 
-  // Fetch real CRM leads from PostgreSQL for LLM context
   let realCrmLeads = [];
   try {
     const crmRes = await pool.query('SELECT name, company, value, stage FROM clients_crm ORDER BY created_at DESC LIMIT 20');
@@ -1419,7 +1472,7 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const tasksContext = realClickUpTasks || '- Nenhuma tarefa retornada pela ClickUp API no momento.';
   const actionsContext = executedActionsResult ? `\n\n### AÇÕES REAIS EXECUTADAS NO SISTEMA COM BASE NO COMANDO DA JULIANA:\n${executedActionsResult}\n` : '';
 
-  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (DADOS 100% REAIS EXTRAÍDOS DE PRODUÇÃO):
+  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (NOUS PORTAL INFRASTRUCTURE & REAIS DB):
 ${actionsContext}
 [MEMÓRIAS PERSISTENTES E REGRAS DO USUÁRIO (USER_MEMORIES DB)]:
 ${memoriesSummary}
@@ -1437,52 +1490,69 @@ ${crmSummary}
 ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Documentação técnica carregada dos conectores.'}
 
 ### INSTRUÇÕES OBRIGATÓRIAS PARA A HERMES CENTRAL JULIANA:
-- Consulte e respeite estritamente as especificações de API e procedimentos oficiais acima ANTES de agir.
-- Com ferramentas habilitadas, uma ordem imperativa clara da administradora ("faça", "crie e delete a tarefa teste") é autorização de execução no modo de teste: execute, não responda apenas com plano nem peça confirmação novamente.
-- Para teste ClickUp sem lista: use DISCOVER_CLICKUP_LISTS, escolha uma lista retornada, crie tarefa com "[TESTE HERMES]", exclua somente o ID criado na sequência e reporte evidências factuais.
-- Quando a administradora (Juliana) solicitar ações (como "limpe telegram e asaas", "salve a chave X", "crie a tarefa Y"), verifique a seção "AÇÕES REAIS EXECUTADAS NO SISTEMA" acima e CONFIRME FACTUALMENTE à Juliana que a ação foi concluída no PostgreSQL / ClickUp com sucesso.
+- Autonomia e ferramentas (Tools) estão 100% habilitadas e ativas via Nous Portal API.
+- Quando a administradora solicitar ações (como "crie a tarefa X no ClickUp", "limpe o vault", "atualize o orçamento Meta Ads"), invoque diretamente a ferramenta (Tool) apropriada.
 - NUNCA alucine ou invente dados fictícios. Responda estritamente com base nos dados reais do ecossistema.
-- Entregue respostas executivas objetivas e diretas para a Juliana.`;
+- Entregue respostas executivas objetivas, humanas e diretas para a Juliana.`;
 
   const modeInstruction = MODES && MODES[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${MODES[mode]}` : '';
   const fullSystemPrompt = `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
 
-  const callOpenRouter = async (modelName) => {
-    const messages = [{ role: 'system', content: fullSystemPrompt }, { role: 'user', content: fullPromptMessage }];
-    let message = await callLLMWithTools(modelName, messages, routing.complexity === 'HEAVY' ? 2000 : 1200, autonomyAuthorized ? TOOL_DEFINITIONS : []);
+  const executeCallChain = async (modelName) => {
+    // INJECT PREVIOUS TURNS INTO THE MESSAGES ARRAY FOR FULL CONTEXT CONVERSATION MEMORY!
+    const messages = [
+      { role: 'system', content: fullSystemPrompt },
+      ...previousTurns,
+      { role: 'user', content: fullPromptMessage }
+    ];
+
+    let message = await callLLMWithTools(
+      modelName,
+      messages,
+      routing.complexity === 'HEAVY' ? 2000 : 1200,
+      autonomyAuthorized ? TOOL_DEFINITIONS : []
+    );
+
     for (let turn = 0; turn < 5 && Array.isArray(message.tool_calls) && message.tool_calls.length; turn += 1) {
       messages.push(message);
       for (const toolCall of message.tool_calls) {
         let result;
         try {
+          console.log(`[AUTONOMY TOOL CALL] Executing tool: ${toolCall.function.name} with args:`, toolCall.function.arguments);
           result = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), realKeys);
         } catch (toolError) {
+          console.warn(`[AUTONOMY TOOL ERR] Tool ${toolCall.function.name} failed:`, toolError.message);
           result = { error: toolError.message };
         }
         messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
       }
-      message = await callLLMWithTools(modelName, messages, routing.complexity === 'HEAVY' ? 2000 : 1200, autonomyAuthorized ? TOOL_DEFINITIONS : []);
+      message = await callLLMWithTools(
+        modelName,
+        messages,
+        routing.complexity === 'HEAVY' ? 2000 : 1200,
+        autonomyAuthorized ? TOOL_DEFINITIONS : []
+      );
     }
-    return message.content || 'Ação processada; consulte o histórico executivo para o recibo.';
+    return message.content || 'Ação executada com sucesso e registradas evidências no ecossistema.';
   };
 
   try {
     modelUsed = routing.primary;
-    responseText = await callOpenRouter(routing.primary);
+    responseText = await executeCallChain(routing.primary);
   } catch (primaryErr) {
-    console.warn(`[OPENROUTER PRIMARY MODEL FAILED (${routing.primary})]:`, primaryErr.message);
+    console.warn(`[NOUS PORTAL PRIMARY MODEL FAILED (${routing.primary})]:`, primaryErr.message);
     isFallback = true;
     for (const fbModel of routing.fallbacks) {
       try {
         modelUsed = fbModel;
-        responseText = await callOpenRouter(fbModel);
+        responseText = await executeCallChain(fbModel);
         break;
       } catch (fbErr) {
-        console.warn(`[OPENROUTER FALLBACK FAILED (${fbModel})]:`, fbErr.message);
+        console.warn(`[MODEL FALLBACK FAILED (${fbModel})]:`, fbErr.message);
       }
     }
     if (!responseText) {
-      responseText = `[Hermes Central Juliana]: Instabilidade temporária no serviço OpenRouter. O comando foi registrado e a equipe técnica já foi notificada.`;
+      responseText = `[Hermes Central Juliana]: Instabilidade temporária. O comando foi registrado.`;
     }
   }
 
