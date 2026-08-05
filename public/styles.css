@@ -1841,3 +1841,24 @@ body {
   border-color: var(--red);
   color: #ffffff;
 }
+
+/* Hermes v5.2 — operational workspace layout */
+.sessions-container { min-height: 0; flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden; }
+.sessions-list { min-height: 72px; overflow-y: auto; padding-right: 4px; }
+.sidebar-footer { flex: 0 0 auto; }
+.connector-card, .vault-form-card, .vault-status-card { border: 1px solid var(--border-color); box-shadow: 0 12px 32px rgba(15,23,42,.08); }
+.qr-container { min-height: 180px; display: grid; place-items: center; background: linear-gradient(145deg, rgba(99,102,241,.08), rgba(6,182,212,.04)); border-radius: 16px; }
+.qr-box { min-height: 150px; }
+.crm-insights { display: grid; grid-template-columns: 160px 160px minmax(260px, 1fr); gap: 14px; margin: 0 0 20px; }
+.crm-metric,.crm-intel-feed,.skill-card { border: 1px solid var(--border-color); border-radius: 14px; background: var(--bg-card); padding: 15px; }
+.crm-metric span,.crm-metric small,.lead-meta { display:block; color:var(--text-muted); font-size:11px; }
+.crm-metric strong { display:block; font-size:28px; margin:5px 0; color:var(--text-main); }
+.crm-intel-feed > span { display:block; font-weight:700; margin-bottom:8px; }
+.intel-event { display:flex; justify-content:space-between; gap:12px; font-size:12px; padding:5px 0; border-top:1px solid var(--border-color); }
+.intel-event span { color:var(--text-muted); }
+.kanban-card-top { display:flex; align-items:start; justify-content:space-between; gap:8px; }
+.lead-score { border-radius:999px; padding:2px 7px; font-size:11px; font-weight:800; background:rgba(99,102,241,.15); color:var(--accent-primary); }.lead-score.hot{background:rgba(16,185,129,.15);color:var(--green)}
+.skills-actions { display:flex; gap:8px; flex-wrap:wrap; }.ghost-btn{background:transparent!important;border:1px solid var(--border-color)!important;color:var(--text-main)!important}
+.skills-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(240px,1fr)); gap:14px; }.skill-card-head{display:flex;gap:9px;align-items:center}.skill-card p{min-height:42px;color:var(--text-muted);font-size:12px;line-height:1.5}.text-btn{border:0;background:none;color:var(--accent-primary);cursor:pointer;padding:0 12px 0 0}.text-btn.danger{color:var(--red)}
+.app-modal { z-index:10000; background:rgba(15,23,42,.72); backdrop-filter:blur(8px); }.modal-card { width:620px; max-width:calc(100vw - 32px); background:var(--bg-card); color:var(--text-main); border:1px solid var(--border-color); border-radius:18px; padding:24px; box-shadow:0 28px 70px rgba(0,0,0,.35); }.modal-card-wide{width:760px}.modal-heading{display:flex;justify-content:space-between;align-items:start;margin-bottom:20px}.modal-heading h3{margin:4px 0 0}.eyebrow{font-size:10px;font-weight:800;letter-spacing:.1em;color:var(--accent-primary)}.icon-close{border:0;background:transparent;color:var(--text-muted);font-size:28px;cursor:pointer}.modal-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.modal-card label{display:grid;gap:7px;font-size:12px;font-weight:700}.modal-card input,.modal-card select,.modal-card textarea{background:var(--bg-input);border:1px solid var(--border-color);border-radius:9px;color:var(--text-main);padding:10px 12px;font:inherit}.modal-actions{display:flex;justify-content:flex-end;gap:10px;margin-top:20px}
+@media(max-width:760px){.crm-insights{grid-template-columns:1fr 1fr}.crm-intel-feed{grid-column:1/-1}.modal-form-grid{grid-template-columns:1fr}.skills-header{gap:16px}.skills-actions{width:100%}}

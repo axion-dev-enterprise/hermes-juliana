@@ -16,10 +16,12 @@ services:
       - POSTGRES_URL=${POSTGRES_URL:?POSTGRES_URL is required}
       - HERMES_OPERATOR_TOKEN=${HERMES_OPERATOR_TOKEN:-}
       - HERMES_TEST_MODE=${HERMES_TEST_MODE:-false}
+      - HERMES_SKILLS_DIR=/app/runtime-skills
     volumes:
       - ./docs:/app/docs
       - ./lib:/app/lib
       - hermes_audit:/app/HISTORY/audit
+      - hermes_skills:/app/runtime-skills
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/healthz"]
       interval: 30s
@@ -45,6 +47,7 @@ services:
 
 volumes:
   hermes_audit:
+  hermes_skills:
 
 networks:
   hermes-network:

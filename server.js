@@ -19,6 +19,18 @@ const pool = new Pool({
 });
 
 const TEST_AUTONOMY_ENABLED = process.env.HERMES_TEST_MODE === 'true';
+const HERMES_SKILLS_DIR = path.resolve(process.env.HERMES_SKILLS_DIR || path.join(__dirname, 'runtime-skills'));
+
+function safeSkillName(value) {
+  return /^[a-z0-9][a-z0-9-]{1,62}$/.test(String(value || '')) ? String(value) : null;
+}
+
+function skillFile(name) {
+  const safeName = safeSkillName(name);
+  if (!safeName) return null;
+  const file = path.resolve(HERMES_SKILLS_DIR, `${safeName}.md`);
+  return file.startsWith(`${HERMES_SKILLS_DIR}${path.sep}`) ? file : null;
+}
 
 function requireAutonomyAuthorization(req, res, next) {
   if (TEST_AUTONOMY_ENABLED) return next();
@@ -58,8 +70,25 @@ async function initDatabaseTables() {
         status VARCHAR(20) DEFAULT 'EXECUTED',
         executed_at TIMESTAMP DEFAULT NOW()
       );
+      ALTER TABLE clients_crm ADD COLUMN IF NOT EXISTS source VARCHAR(40) DEFAULT 'manual';
+      ALTER TABLE clients_crm ADD COLUMN IF NOT EXISTS whatsapp_sender VARCHAR(80);
+      ALTER TABLE clients_crm ADD COLUMN IF NOT EXISTS classification VARCHAR(40) DEFAULT 'new';
+      ALTER TABLE clients_crm ADD COLUMN IF NOT EXISTS lead_score INT DEFAULT 0;
+      ALTER TABLE clients_crm ADD COLUMN IF NOT EXISTS last_message TEXT;
+      ALTER TABLE clients_crm ADD COLUMN IF NOT EXISTS last_message_at TIMESTAMP;
+      CREATE TABLE IF NOT EXISTS crm_whatsapp_events (
+        id SERIAL PRIMARY KEY,
+        sender VARCHAR(80) NOT NULL,
+        push_name VARCHAR(160),
+        message TEXT NOT NULL,
+        stage VARCHAR(40) NOT NULL,
+        classification VARCHAR(40) NOT NULL,
+        score INT NOT NULL,
+        lead_id INT,
+        created_at TIMESTAMP DEFAULT NOW()
+      );
     `);
-    console.log('[DB INIT] Database tables user_memories, agent_shared_blackboard, executive_action_receipts ready.');
+    console.log('[DB INIT] Database and CRM intelligence tables ready.');
   } catch (err) {
     console.warn('[DB INIT WARN]:', err.message);
   }
@@ -126,6 +155,35 @@ function compressSessionContext(messages) {
 
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+app.get('/api/v1/skills', (req, res) => {
+  try {
+    fs.mkdirSync(HERMES_SKILLS_DIR, { recursive: true });
+    const skills = fs.readdirSync(HERMES_SKILLS_DIR).filter((file) => file.endsWith('.md')).map((file) => {
+      const content = fs.readFileSync(path.join(HERMES_SKILLS_DIR, file), 'utf8');
+      return { name: path.basename(file, '.md'), content, updatedAt: fs.statSync(path.join(HERMES_SKILLS_DIR, file)).mtime.toISOString() };
+    });
+    return res.json({ status: 'success', skills });
+  } catch (err) { return res.status(500).json({ error: 'Falha ao ler skills.' }); }
+});
+
+app.put('/api/v1/skills/:name', requireAutonomyAuthorization, (req, res) => {
+  const file = skillFile(req.params.name);
+  const content = String(req.body?.content || '').trim();
+  if (!file || !content || content.length > 100000) return res.status(400).json({ error: 'Skill inválida.' });
+  try {
+    fs.mkdirSync(HERMES_SKILLS_DIR, { recursive: true });
+    fs.writeFileSync(file, content, { encoding: 'utf8', mode: 0o600 });
+    return res.json({ status: 'success', name: req.params.name });
+  } catch (err) { return res.status(500).json({ error: 'Falha ao salvar skill.' }); }
+});
+
+app.delete('/api/v1/skills/:name', requireAutonomyAuthorization, (req, res) => {
+  const file = skillFile(req.params.name);
+  if (!file || !fs.existsSync(file)) return res.status(404).json({ error: 'Skill não encontrada.' });
+  try { fs.unlinkSync(file); return res.json({ status: 'success' }); }
+  catch (err) { return res.status(500).json({ error: 'Falha ao excluir skill.' }); }
+});
 
 // REAL VAULT & CLICKUP DB INTEGRATION HELPERS
 async function getRealVaultKeys() {
@@ -769,6 +827,61 @@ app.post('/api/v1/connectors/whatsapp/reconnect', async (req, res) => {
   });
 });
 
+function classifyWhatsAppMessage(message = '') {
+  const text = String(message).toLocaleLowerCase('pt-BR');
+  const match = (words) => words.some((word) => text.includes(word));
+  if (match(['fechado', 'vamos fechar', 'pode emitir', 'assinar contrato', 'pagamento realizado'])) {
+    return { stage: 'fechado_ganho', classification: 'won', score: 100 };
+  }
+  if (match(['proposta', 'orçamento', 'orcamento', 'cotação', 'cotacao', 'valor', 'preço', 'preco'])) {
+    return { stage: 'proposta_enviada', classification: 'proposal_intent', score: 80 };
+  }
+  if (match(['reunião', 'reuniao', 'agenda', 'call', 'videochamada', 'horário', 'horario'])) {
+    return { stage: 'reuniao_agendada', classification: 'meeting_intent', score: 70 };
+  }
+  if (match(['quero', 'interesse', 'interessado', 'preciso', 'contratar', 'informações', 'informacoes'])) {
+    return { stage: 'lead_recebido', classification: 'qualified_interest', score: 55 };
+  }
+  return { stage: 'lead_recebido', classification: 'inbound_message', score: 25 };
+}
+
+async function registerWhatsAppCrmIntelligence({ sender, pushName, message }) {
+  const intelligence = classifyWhatsAppMessage(message);
+  const contactName = String(pushName || sender).slice(0, 160);
+  try {
+    const existing = await pool.query(
+      'SELECT id, stage, lead_score FROM clients_crm WHERE whatsapp_sender = $1 ORDER BY created_at DESC LIMIT 1',
+      [sender]
+    );
+    let lead;
+    if (existing.rows[0]) {
+      const current = existing.rows[0];
+      const score = Math.max(Number(current.lead_score) || 0, intelligence.score);
+      const stage = current.stage === 'fechado_ganho' ? current.stage : intelligence.stage;
+      const updated = await pool.query(`UPDATE clients_crm
+        SET stage = $1, classification = $2, lead_score = $3, last_message = $4, last_message_at = NOW(), source = 'whatsapp'
+        WHERE id = $5
+        RETURNING id`, [stage, intelligence.classification, score, message.slice(0, 4000), current.id]);
+      lead = updated.rows[0];
+      intelligence.stage = stage;
+      intelligence.score = score;
+    } else {
+      const inserted = await pool.query(`INSERT INTO clients_crm
+        (name, company, value, stage, source, whatsapp_sender, classification, lead_score, last_message, last_message_at, created_at)
+        VALUES ($1, 'Contato WhatsApp', 'A qualificar', $2, 'whatsapp', $3, $4, $5, $6, NOW(), NOW())
+        RETURNING id`, [contactName, intelligence.stage, sender, intelligence.classification, intelligence.score, message.slice(0, 4000)]);
+      lead = inserted.rows[0];
+    }
+    await pool.query(`INSERT INTO crm_whatsapp_events (sender, push_name, message, stage, classification, score, lead_id)
+      VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+      [sender, contactName, message.slice(0, 4000), intelligence.stage, intelligence.classification, intelligence.score, lead.id]);
+    return { ...intelligence, leadId: String(lead.id) };
+  } catch (err) {
+    console.warn('[CRM WHATSAPP INTELLIGENCE WARN]:', err.message);
+    return null;
+  }
+}
+
 app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
   const { status, account, sender, message, pushName } = req.body;
   console.log('[WHATSAPP WEBHOOK RECEIVED]:', { status, account, sender, message });
@@ -788,6 +901,8 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
   if (sender && message) {
     console.log(`[WHATSAPP WEBHOOK] Routing message from ${pushName || sender} to Juliana LLM...`);
     try {
+      const crmIntelligence = await registerWhatsAppCrmIntelligence({ sender, pushName, message });
+      if (crmIntelligence) console.log('[CRM WHATSAPP] Lead classified:', crmIntelligence.classification, crmIntelligence.stage);
       const routing = selectOptimalModel(message, 'EXECUTIVE');
 
       // Retrieve conversation history for context
@@ -907,7 +1022,8 @@ app.post('/api/v1/connectors/telegram/token', async (req, res) => {
 // CRM ENDPOINTS (POSTGRESQL REAL DATA)
 app.get('/api/v1/crm/leads', async (req, res) => {
   try {
-    const dbRes = await pool.query('SELECT id::text, name, company, value, stage FROM clients_crm ORDER BY created_at DESC');
+    const dbRes = await pool.query(`SELECT id::text, name, company, value, stage, source, classification,
+      lead_score, whatsapp_sender, last_message, last_message_at FROM clients_crm ORDER BY created_at DESC`);
     if (dbRes.rows.length > 0) {
       return res.json({ status: 'success', data: dbRes.rows });
     }
@@ -918,21 +1034,51 @@ app.get('/api/v1/crm/leads', async (req, res) => {
 });
 
 app.post('/api/v1/crm/leads', async (req, res) => {
-  const { name, company, value, stage = 'lead_recebido' } = req.body;
+  const { name, company, value, stage = 'lead_recebido', source = 'manual', whatsappSender } = req.body;
   if (!name) return res.status(400).json({ error: 'Nome do lead é obrigatório.' });
 
   try {
     const dbRes = await pool.query(`
-      INSERT INTO clients_crm (name, company, value, stage, created_at)
-      VALUES ($1, $2, $3, $4, NOW())
-      RETURNING id::text, name, company, value, stage
-    `, [name, company || 'Empresa Privada', value || 'R$ 25.000,00', stage]);
+      INSERT INTO clients_crm (name, company, value, stage, source, whatsapp_sender, created_at)
+      VALUES ($1, $2, $3, $4, $5, $6, NOW())
+      RETURNING id::text, name, company, value, stage, source, classification, lead_score, whatsapp_sender
+    `, [name, company || 'Empresa Privada', value || 'A qualificar', stage, source, whatsappSender || null]);
     return res.status(201).json({ status: 'success', lead: dbRes.rows[0] });
   } catch (err) {
     console.error('[DB CRM INSERT ERROR]:', err.message);
-    const newLead = { id: `lead-${Date.now()}`, name, company: company || 'Empresa Privada', value: value || 'R$ 25.000,00', stage };
+    const newLead = { id: `lead-${Date.now()}`, name, company: company || 'Empresa Privada', value: value || 'A qualificar', stage, source };
     crmLeadsStore.unshift(newLead);
     res.status(201).json({ status: 'success', lead: newLead });
+  }
+});
+
+app.patch('/api/v1/crm/leads/:id', async (req, res) => {
+  const allowedStages = ['lead_recebido', 'reuniao_agendada', 'proposta_enviada', 'fechado_ganho'];
+  const { stage, company, value } = req.body || {};
+  if (stage && !allowedStages.includes(stage)) return res.status(400).json({ error: 'Estágio inválido.' });
+  try {
+    const updated = await pool.query(`UPDATE clients_crm SET
+      stage = COALESCE($1, stage), company = COALESCE($2, company), value = COALESCE($3, value)
+      WHERE id = $4 RETURNING id::text, name, company, value, stage, source, classification, lead_score, whatsapp_sender`,
+      [stage || null, company || null, value || null, req.params.id]);
+    if (!updated.rows[0]) return res.status(404).json({ error: 'Lead não encontrado.' });
+    return res.json({ status: 'success', lead: updated.rows[0] });
+  } catch (err) {
+    return res.status(500).json({ error: 'Não foi possível atualizar o lead.' });
+  }
+});
+
+app.get('/api/v1/crm/overview', async (req, res) => {
+  try {
+    const [stages, intelligence] = await Promise.all([
+      pool.query(`SELECT stage, COUNT(*)::int AS count, COALESCE(MAX(lead_score), 0)::int AS max_score
+        FROM clients_crm GROUP BY stage`),
+      pool.query(`SELECT sender, push_name, message, stage, classification, score, created_at
+        FROM crm_whatsapp_events ORDER BY created_at DESC LIMIT 8`)
+    ]);
+    return res.json({ status: 'success', stages: stages.rows, whatsappEvents: intelligence.rows });
+  } catch (err) {
+    return res.json({ status: 'success', stages: [], whatsappEvents: [] });
   }
 });
 
@@ -1292,6 +1438,8 @@ ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Do
 
 ### INSTRUÇÕES OBRIGATÓRIAS PARA A HERMES CENTRAL JULIANA:
 - Consulte e respeite estritamente as especificações de API e procedimentos oficiais acima ANTES de agir.
+- Com ferramentas habilitadas, uma ordem imperativa clara da administradora ("faça", "crie e delete a tarefa teste") é autorização de execução no modo de teste: execute, não responda apenas com plano nem peça confirmação novamente.
+- Para teste ClickUp sem lista: use DISCOVER_CLICKUP_LISTS, escolha uma lista retornada, crie tarefa com "[TESTE HERMES]", exclua somente o ID criado na sequência e reporte evidências factuais.
 - Quando a administradora (Juliana) solicitar ações (como "limpe telegram e asaas", "salve a chave X", "crie a tarefa Y"), verifique a seção "AÇÕES REAIS EXECUTADAS NO SISTEMA" acima e CONFIRME FACTUALMENTE à Juliana que a ação foi concluída no PostgreSQL / ClickUp com sucesso.
 - NUNCA alucine ou invente dados fictícios. Responda estritamente com base nos dados reais do ecossistema.
 - Entregue respostas executivas objetivas e diretas para a Juliana.`;
@@ -1302,7 +1450,7 @@ ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Do
   const callOpenRouter = async (modelName) => {
     const messages = [{ role: 'system', content: fullSystemPrompt }, { role: 'user', content: fullPromptMessage }];
     let message = await callLLMWithTools(modelName, messages, routing.complexity === 'HEAVY' ? 2000 : 1200, autonomyAuthorized ? TOOL_DEFINITIONS : []);
-    for (let turn = 0; turn < 3 && Array.isArray(message.tool_calls) && message.tool_calls.length; turn += 1) {
+    for (let turn = 0; turn < 5 && Array.isArray(message.tool_calls) && message.tool_calls.length; turn += 1) {
       messages.push(message);
       for (const toolCall of message.tool_calls) {
         let result;

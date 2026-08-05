@@ -17,6 +17,9 @@ document.addEventListener('DOMContentLoaded', () => {
   loadVaultKeys();
   loadConnectorsStatus();
   loadCrmLeads();
+  loadSkills();
+  initCrmLeadModal();
+  initSkillsCenter();
   initChatForm();
   initVoiceRecognition();
   initCommandPalette();
@@ -109,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
           if (targetTabId === 'tab-vault') loadVaultKeys();
           if (targetTabId === 'tab-connectors') loadConnectorsStatus();
           if (targetTabId === 'tab-crm') loadCrmLeads();
+          if (targetTabId === 'tab-skills') loadSkills();
         }
       });
     });
@@ -850,6 +854,7 @@ document.addEventListener('DOMContentLoaded', () => {
       const leads = data.data || data;
 
       renderCrmBoard(leads);
+      loadCrmOverview();
     } catch (err) {
       console.warn('[CRM] Usando dados default local:', err);
     }
@@ -867,11 +872,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
       let html = '';
       filtered.forEach(l => {
+        const score = Number(l.lead_score || 0);
         html += `
-          <div class="kanban-card">
-            <div class="kanban-card-name">${escapeHtml(l.name)}</div>
+          <div class="kanban-card" data-lead-id="${escapeHtml(l.id)}">
+            <div class="kanban-card-top"><div class="kanban-card-name">${escapeHtml(l.name)}</div>${score ? `<span class="lead-score ${score >= 70 ? 'hot' : ''}">${score}</span>` : ''}</div>
             <div class="kanban-card-company">${escapeHtml(l.company || 'Empresa')}</div>
             <div class="kanban-card-value">${escapeHtml(l.value || 'R$ 0,00')}</div>
+            <div class="lead-meta">${l.source === 'whatsapp' ? '<i class="fa-brands fa-whatsapp"></i> WhatsApp' : '<i class="fa-solid fa-user-pen"></i> Manual'}</div>
           </div>
         `;
       });
@@ -879,24 +886,65 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  async function addNewLead() {
-    const name = prompt('Nome do Novo Lead / Oportunidade:');
-    if (!name) return;
-    const company = prompt('Empresa do Lead:', 'Empresa Privada');
-    const value = prompt('Valor da Oportunidade (R$):', 'R$ 35.000,00');
-
+  async function loadCrmOverview() {
     try {
-      const res = await fetch('/api/v1/crm/leads', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, company, value, stage: 'lead_recebido' })
-      });
-      if (res.ok) {
-        loadCrmLeads();
-      }
-    } catch (err) {
-      console.error('[CRM Add Lead Error]', err);
-    }
+      const res = await fetch('/api/v1/crm/overview'); if (!res.ok) return;
+      const overview = await res.json(); const events = overview.whatsappEvents || [];
+      const el = document.getElementById('crm-intelligence-list');
+      const total = document.getElementById('crm-whatsapp-count'); const hot = document.getElementById('crm-hot-count');
+      if (total) total.textContent = events.length;
+      if (hot) hot.textContent = events.filter((event) => Number(event.score) >= 70).length;
+      if (el) el.innerHTML = events.length ? events.slice(0, 3).map((event) => `<div class="intel-event"><strong>${escapeHtml(event.push_name || event.sender)}</strong><span>${escapeHtml(event.classification)} · ${escapeHtml(event.stage)}</span></div>`).join('') : 'Aguardando eventos...';
+    } catch (err) { console.warn('[CRM overview]', err); }
+  }
+
+  function openCrmLeadModal() {
+    const modal = document.getElementById('crm-lead-modal');
+    if (modal) { modal.classList.remove('hidden'); document.getElementById('crm-lead-name')?.focus(); }
+  }
+  function closeCrmLeadModal() { document.getElementById('crm-lead-modal')?.classList.add('hidden'); }
+  function initCrmLeadModal() {
+    document.getElementById('crm-lead-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault(); const form = new FormData(event.currentTarget);
+      const payload = Object.fromEntries(form.entries());
+      try {
+        const res = await fetch('/api/v1/crm/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        if (!res.ok) throw new Error('Falha ao salvar lead');
+        event.currentTarget.reset(); closeCrmLeadModal(); loadCrmLeads();
+      } catch (err) { console.error('[CRM Add Lead Error]', err); }
+    });
+  }
+
+  let cachedSkills = [];
+  async function loadSkills() {
+    const list = document.getElementById('skills-list');
+    try {
+      const res = await fetch('/api/v1/skills'); if (!res.ok) throw new Error('Falha ao carregar');
+      const data = await res.json(); cachedSkills = data.skills || [];
+      if (list) list.innerHTML = cachedSkills.length ? cachedSkills.map((skill) => `<article class="skill-card"><div class="skill-card-head"><i class="fa-solid fa-wand-magic-sparkles"></i><strong>${escapeHtml(skill.name)}</strong></div><p>${escapeHtml((skill.content || '').replace(/^#\s*/m, '').slice(0, 130)) || 'Sem descrição'}</p><div><button class="text-btn" data-action="skill-edit" data-skill="${escapeHtml(skill.name)}">Editar</button><button class="text-btn danger" data-action="skill-delete" data-skill="${escapeHtml(skill.name)}">Excluir</button></div></article>`).join('') : '<div class="vault-empty">Nenhuma skill operacional criada.</div>';
+    } catch (err) { if (list) list.innerHTML = '<div class="vault-empty">Não foi possível carregar as skills.</div>'; }
+  }
+  function openSkillEditor(skill = null) {
+    document.getElementById('skill-editor-title').textContent = skill ? `Editar: ${skill.name}` : 'Nova Skill';
+    const name = document.getElementById('skill-editor-name'); const content = document.getElementById('skill-editor-content');
+    name.value = skill?.name || ''; name.readOnly = Boolean(skill); content.value = skill?.content || '# Objetivo\n\n';
+    document.getElementById('skill-editor-modal').classList.remove('hidden'); name.focus();
+  }
+  function closeSkillEditor() { document.getElementById('skill-editor-modal')?.classList.add('hidden'); }
+  function initSkillsCenter() {
+    document.getElementById('skill-editor-form')?.addEventListener('submit', async (event) => {
+      event.preventDefault(); const name = document.getElementById('skill-editor-name').value.trim(); const content = document.getElementById('skill-editor-content').value;
+      const res = await fetch(`/api/v1/skills/${encodeURIComponent(name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
+      if (res.ok) { closeSkillEditor(); loadSkills(); } else { alert('Não foi possível salvar a skill.'); }
+    });
+    document.getElementById('skills-import-input')?.addEventListener('change', async (event) => {
+      const file = event.target.files?.[0]; if (!file) return;
+      try { const imported = JSON.parse(await file.text()); for (const skill of (imported.skills || [])) await fetch(`/api/v1/skills/${encodeURIComponent(skill.name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: skill.content }) }); loadSkills(); } catch (_) { alert('Arquivo de skills inválido.'); } finally { event.target.value = ''; }
+    });
+  }
+  function exportSkills() {
+    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), skills: cachedSkills }, null, 2)], { type: 'application/json' });
+    const link = document.createElement('a'); link.href = URL.createObjectURL(blob); link.download = 'hermes-skills.json'; link.click(); URL.revokeObjectURL(link.href);
   }
 
   // -------------------------------------------------------------
@@ -1026,9 +1074,19 @@ document.addEventListener('DOMContentLoaded', () => {
       // Adicionar Lead CRM
       const btnAddLead = e.target.closest('#btn-add-lead-modal');
       if (btnAddLead) {
-        addNewLead();
+        openCrmLeadModal();
         return;
       }
+
+      if (e.target.closest('[data-action="crm-modal-close"]')) { closeCrmLeadModal(); return; }
+      if (e.target.closest('[data-action="skill-new"]')) { openSkillEditor(); return; }
+      if (e.target.closest('[data-action="skill-modal-close"]')) { closeSkillEditor(); return; }
+      if (e.target.closest('[data-action="skill-import"]')) { document.getElementById('skills-import-input')?.click(); return; }
+      if (e.target.closest('[data-action="skill-export"]')) { exportSkills(); return; }
+      const skillEdit = e.target.closest('[data-action="skill-edit"]');
+      if (skillEdit) { openSkillEditor(cachedSkills.find((skill) => skill.name === skillEdit.dataset.skill)); return; }
+      const skillDelete = e.target.closest('[data-action="skill-delete"]');
+      if (skillDelete && confirm(`Excluir a skill ${skillDelete.dataset.skill}?`)) { fetch(`/api/v1/skills/${encodeURIComponent(skillDelete.dataset.skill)}`, { method: 'DELETE' }).then(() => loadSkills()); return; }
 
       // Ações genéricas (Folder, Archive toggle, Session actions)
       if (actionBtn) {

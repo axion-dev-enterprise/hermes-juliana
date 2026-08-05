@@ -13,7 +13,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
   <link rel="stylesheet" href="index.css?v=4.2.6">
-  <link rel="stylesheet" href="styles.css?v=4.2.6">
+  <link rel="stylesheet" href="styles.css?v=5.2.0">
 </head>
 <body>
 
@@ -171,6 +171,10 @@
         <button class="nav-item" data-tab="tab-crm">
           <div class="nav-icon"><i class="fa-solid fa-chart-line"></i></div>
           <span>CRM & Funil</span>
+        </button>
+        <button class="nav-item" data-tab="tab-skills">
+          <div class="nav-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+          <span>Skills</span>
         </button>
       </nav>
 
@@ -512,6 +516,12 @@
           </button>
         </div>
 
+        <div class="crm-insights" id="crm-insights">
+          <div class="crm-metric"><span>Entrada WhatsApp</span><strong id="crm-whatsapp-count">0</strong><small>mensagens classificadas</small></div>
+          <div class="crm-metric"><span>Prioridade alta</span><strong id="crm-hot-count">0</strong><small>score ≥ 70</small></div>
+          <div class="crm-intel-feed"><span><i class="fa-brands fa-whatsapp text-green"></i> Inteligência da ponte</span><div id="crm-intelligence-list">Aguardando eventos...</div></div>
+        </div>
+
         <div class="kanban-board">
           <div class="kanban-column" data-stage="lead_recebido">
             <div class="kanban-col-header blue">
@@ -542,6 +552,15 @@
             <div class="kanban-cards" id="cards-fechado_ganho"></div>
           </div>
         </div>
+      </section>
+
+      <section id="tab-skills" class="tab-panel hidden">
+        <div class="panel-header skills-header">
+          <div><h3><i class="fa-solid fa-wand-magic-sparkles text-purple"></i> Centro de Skills</h3><p>Crie, edite, importe e exporte instruções operacionais do Hermes.</p></div>
+          <div class="skills-actions"><button class="connector-btn" data-action="skill-new"><i class="fa-solid fa-plus"></i> Nova Skill</button><button class="connector-btn ghost-btn" data-action="skill-import"><i class="fa-solid fa-file-import"></i> Importar</button><button class="connector-btn ghost-btn" data-action="skill-export"><i class="fa-solid fa-file-export"></i> Exportar</button></div>
+        </div>
+        <input id="skills-import-input" type="file" accept="application/json,.json" hidden>
+        <div id="skills-list" class="skills-grid"><div class="vault-empty"><i class="fa-solid fa-spinner fa-spin"></i> Carregando skills...</div></div>
       </section>
 
     </main>
@@ -594,6 +613,23 @@
     </div>
   </div>
 
-  <script src="app.js?v=4.2.6"></script>
+  <div id="crm-lead-modal" class="login-screen hidden app-modal">
+    <form id="crm-lead-form" class="modal-card">
+      <div class="modal-heading"><div><span class="eyebrow">CRM OPERACIONAL</span><h3>Novo lead ou oportunidade</h3></div><button type="button" class="icon-close" data-action="crm-modal-close" aria-label="Fechar">×</button></div>
+      <div class="modal-form-grid"><label>Nome<input id="crm-lead-name" name="name" required maxlength="160" placeholder="Nome do contato"></label><label>Empresa<input id="crm-lead-company" name="company" maxlength="160" placeholder="Empresa / grupo"></label><label>Valor<input id="crm-lead-value" name="value" maxlength="50" placeholder="R$ 0,00 ou A qualificar"></label><label>Estágio<select id="crm-lead-stage" name="stage"><option value="lead_recebido">Lead recebido</option><option value="reuniao_agendada">Reunião</option><option value="proposta_enviada">Proposta</option><option value="fechado_ganho">Fechado</option></select></label></div>
+      <div class="modal-actions"><button type="button" class="connector-btn ghost-btn" data-action="crm-modal-close">Cancelar</button><button type="submit" class="connector-btn">Salvar lead</button></div>
+    </form>
+  </div>
+
+  <div id="skill-editor-modal" class="login-screen hidden app-modal">
+    <form id="skill-editor-form" class="modal-card modal-card-wide">
+      <div class="modal-heading"><div><span class="eyebrow">SKILL OPERACIONAL</span><h3 id="skill-editor-title">Nova Skill</h3></div><button type="button" class="icon-close" data-action="skill-modal-close" aria-label="Fechar">×</button></div>
+      <label>Identificador<input id="skill-editor-name" required pattern="[a-z0-9][a-z0-9-]{1,62}" placeholder="minha-skill"></label>
+      <label>Instruções (Markdown)<textarea id="skill-editor-content" required rows="13" placeholder="# Objetivo&#10;&#10;Descreva o fluxo seguro desta skill."></textarea></label>
+      <div class="modal-actions"><button type="button" class="connector-btn ghost-btn" data-action="skill-modal-close">Cancelar</button><button type="submit" class="connector-btn">Salvar skill</button></div>
+    </form>
+  </div>
+
+  <script src="app.js?v=5.2.0"></script>
 </body>
 </html>
