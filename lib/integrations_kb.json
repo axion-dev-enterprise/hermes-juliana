@@ -1,0 +1,62 @@
+{
+  "system": "HERMES_INTEGRATIONS_KB_V4.2",
+  "updated_at": "2026-08-04T15:30:00Z",
+  "integrations": [
+    {
+      "id": "asaas",
+      "name": "Asaas API v3",
+      "category": "financial",
+      "base_url": "https://www.asaas.com/api/v3",
+      "auth_header": "access_token",
+      "features": ["PIX", "Boleto", "Cartão", "Assinaturas", "Webhooks IPN"]
+    },
+    {
+      "id": "clickup",
+      "name": "ClickUp API v2",
+      "category": "project_management",
+      "base_url": "https://api.clickup.com/api/v2",
+      "auth_header": "Authorization",
+      "features": ["Tasks", "Lists", "Time Tracking", "Kanban", "Webhooks"]
+    },
+    {
+      "id": "authentique",
+      "name": "Authentique GraphQL API",
+      "category": "contracts",
+      "base_url": "https://api.authentique.com.br/v2/graphql",
+      "auth_header": "Authorization Bearer",
+      "features": ["Assinatura Digital", "Minutas", "Gestão de Signatários"]
+    },
+    {
+      "id": "meta_ads",
+      "name": "Meta Ads Graph API v19.0",
+      "category": "marketing",
+      "base_url": "https://graph.facebook.com/v19.0",
+      "auth_header": "access_token",
+      "features": ["Campanhas", "Conjuntos Anúncios", "Criativos", "Insights ROI"]
+    },
+    {
+      "id": "whatsapp_baileys",
+      "name": "WhatsApp Baileys / Evolution Engine",
+      "category": "messaging",
+      "base_url": "http://179.197.237.20:8080",
+      "auth_header": "apikey",
+      "features": ["Multi-Number", "Audio Opus", "Midias PDF", "QR Code WS"]
+    },
+    {
+      "id": "telegram",
+      "name": "Telegram Bot API",
+      "category": "messaging",
+      "base_url": "https://api.telegram.org",
+      "auth_header": "bot<token>",
+      "features": ["Canais VIP", "Notificações Executivas", "Documentos"]
+    },
+    {
+      "id": "assembly_ai",
+      "name": "AssemblyAI API",
+      "category": "ai_transcription",
+      "base_url": "https://api.assemblyai.com/v2",
+      "auth_header": "authorization",
+      "features": ["Transcrição de Áudios", "Resumo de Reuniões"]
+    }
+  ]
+}

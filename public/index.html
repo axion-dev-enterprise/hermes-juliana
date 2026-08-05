@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Hermes Central | W Soluções Tecnologia</title>
+  <meta name="description" content="Painel Executivo Hermes Central - W Soluções Tecnologia LTDA">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="index.css?v=4.2.6">
+  <link rel="stylesheet" href="styles.css?v=4.2.6">
+</head>
+<body>
+
+  <!-- NATIVE INLINE SVG SPRITE SYSTEM (0 CDN DEPENDENCIES) -->
+  <svg style="display: none;">
+    <symbol id="icon-history" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/>
+      <path d="M3 3v5h5"/>
+      <path d="M12 7v5l4 2"/>
+    </symbol>
+    <symbol id="icon-folder" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+    </symbol>
+    <symbol id="icon-folder-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      <line x1="12" y1="11" x2="12" y2="17"/>
+      <line x1="9" y1="14" x2="15" y2="14"/>
+    </symbol>
+    <symbol id="icon-archive" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="21 8 21 21 3 21 3 8"/>
+      <rect x="1" y="3" width="22" height="5"/>
+      <line x1="10" y1="12" x2="14" y2="12"/>
+    </symbol>
+    <symbol id="icon-edit" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+      <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+    </symbol>
+    <symbol id="icon-trash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polyline points="3 6 5 6 21 6"/>
+      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+      <line x1="10" y1="11" x2="10" y2="17"/>
+      <line x1="14" y1="11" x2="14" y2="17"/>
+    </symbol>
+    <symbol id="icon-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <line x1="12" y1="5" x2="12" y2="19"/>
+      <line x1="5" y1="12" x2="19" y2="12"/>
+    </symbol>
+    <symbol id="icon-filter" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+    </symbol>
+    <symbol id="icon-cpu" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="4" y="4" width="16" height="16" rx="2" ry="2"/>
+      <rect x="9" y="9" width="6" height="6"/>
+      <line x1="9" y1="1" x2="9" y2="4"/>
+      <line x1="15" y1="1" x2="15" y2="4"/>
+      <line x1="9" y1="20" x2="9" y2="23"/>
+      <line x1="15" y1="20" x2="15" y2="23"/>
+      <line x1="20" y1="9" x2="23" y2="9"/>
+      <line x1="20" y1="15" x2="23" y2="15"/>
+      <line x1="1" y1="9" x2="4" y2="9"/>
+      <line x1="1" y1="15" x2="4" y2="15"/>
+    </symbol>
+    <symbol id="icon-zap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+    </symbol>
+  </svg>
+
+  <!-- ANIMATED BACKGROUND PARTICLES -->
+  <div class="bg-particles" id="bg-particles"></div>
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-modal" class="login-screen">
+    <div class="login-backdrop"></div>
+    <div class="login-card" id="login-card">
+      <div class="login-glow"></div>
+      <div class="login-brand">
+        <div class="login-logo">
+          <div class="logo-ring">
+            <div class="logo-inner">
+              <i class="fa-solid fa-bolt"></i>
+            </div>
+          </div>
+          <div class="logo-pulse"></div>
+        </div>
+        <h1 class="login-title">HERMES<span class="text-accent">CENTRAL</span></h1>
+        <p class="login-subtitle">W Soluções Tecnologia LTDA</p>
+      </div>
+
+      <form id="login-form" class="login-form">
+        <div class="input-group">
+          <div class="input-icon"><i class="fa-solid fa-envelope"></i></div>
+          <input type="email" id="login-email" value="juliana@wsolucoes.com.br" required placeholder=" " autocomplete="email">
+          <label class="input-label">E-mail Executivo</label>
+          <div class="input-line"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon"><i class="fa-solid fa-lock"></i></div>
+          <input type="password" id="login-password" required placeholder="Digite sua senha" autocomplete="current-password">
+          <label class="input-label">Senha de Acesso</label>
+          <div class="input-line"></div>
+        </div>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" id="btn-login-submit" class="login-btn">
+          <span class="btn-text">Entrar no Painel</span>
+          <span class="btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+          <div class="btn-shimmer"></div>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <div class="security-badge">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Conexão Segura AES-256</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APPLICATION -->
+  <div id="app-container" class="app-container hidden">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-bolt"></i>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">HERMES<span class="text-accent">CENTRAL</span></span>
+          <span class="brand-company">W Soluções Tecnologia</span>
+        </div>
+      </div>
+
+      <!-- THEME SWITCHER -->
+      <div class="theme-switcher">
+        <button class="theme-btn active" data-theme="dark" title="Midnight">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+        <button class="theme-btn" data-theme="light" title="Light">
+          <i class="fa-solid fa-sun"></i>
+        </button>
+        <button class="theme-btn" data-theme="emerald" title="Emerald">
+          <i class="fa-solid fa-gem"></i>
+        </button>
+        <button class="theme-btn" data-theme="amethyst" title="Amethyst">
+          <i class="fa-solid fa-star"></i>
+        </button>
+      </div>
+
+      <!-- NAVIGATION -->
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="tab-chat">
+          <div class="nav-icon"><i class="fa-solid fa-comments"></i></div>
+          <span>Chat Executivo</span>
+          <div class="nav-active-indicator"></div>
+        </button>
+        <button class="nav-item" data-tab="tab-connectors">
+          <div class="nav-icon"><i class="fa-solid fa-plug"></i></div>
+          <span>Conectores</span>
+        </button>
+        <button class="nav-item" data-tab="tab-vault">
+          <div class="nav-icon"><i class="fa-solid fa-vault"></i></div>
+          <span>Cofre de Chaves</span>
+        </button>
+        <button class="nav-item" data-tab="tab-crm">
+          <div class="nav-icon"><i class="fa-solid fa-chart-line"></i></div>
+          <span>CRM & Funil</span>
+        </button>
+      </nav>
+
+      <!-- NEW CHAT -->
+      <button id="btn-new-chat" class="new-chat-btn">
+        <svg class="svg-icon"><use href="#icon-plus"/></svg>
+        <span>Nova Conversa</span>
+      </button>
+
+      <!-- SESSIONS -->
+      <div class="sessions-container">
+        <div class="sessions-header">
+          <span class="sessions-title"><i class="fa-solid fa-clock-rotate-left"></i> Histórico</span>
+          <button id="btn-toggle-archived" class="sessions-filter" data-action="toggle-archived" title="Arquivados">
+            <i class="fa-solid fa-filter"></i>
+          </button>
+        </div>
+        <div class="sessions-toolbar">
+          <button class="sessions-tool-btn" data-action="create-folder" title="Nova Pasta">
+            <i class="fa-solid fa-folder-plus"></i>
+          </button>
+          <button class="sessions-tool-btn" data-action="toggle-archived" title="Arquivados">
+            <svg class="svg-icon"><use href="#icon-archive"/></svg>
+          </button>
+        </div>
+        <div id="sessions-list" class="sessions-list">
+          <div class="sessions-empty">
+            <i class="fa-solid fa-inbox"></i>
+            <span>Nenhuma sessão</span>
+          </div>
+        </div>
+        <div id="archived-panel" class="archived-panel" style="display:none">
+          <div class="archived-header"><svg class="svg-icon"><use href="#icon-archive"/></svg> Arquivados</div>
+          <div id="archived-list"></div>
+        </div>
+      </div>
+
+      <!-- SIDEBAR FOOTER -->
+      <div class="sidebar-footer">
+        <div class="status-card">
+          <div class="status-row">
+            <span class="status-dot online"></span>
+            <span class="status-text">VPS Online</span>
+          </div>
+          <div class="status-detail">
+            <i class="fa-solid fa-microchip"></i> OpenRouter Free
+          </div>
+          <div class="status-row ws-row">
+            <i class="fa-solid fa-bolt text-yellow"></i>
+            <span id="ws-status-text">WebSocket Ativo</span>
+          </div>
+        </div>
+        <div class="user-card">
+          <div class="user-avatar">J</div>
+          <div class="user-info">
+            <span class="user-name">Juliana</span>
+            <span class="user-role">Executiva</span>
+          </div>
+          <button id="btn-logout" class="logout-btn" title="Sair">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+
+      <!-- TOPBAR -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="mobile-menu-btn" id="mobile-menu-btn">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <div class="topbar-info">
+            <h2><i class="fa-solid fa-bolt text-accent"></i> Agente Central Executivo</h2>
+            <p>Assistente inteligente com 34 sub-agentes especializados</p>
+          </div>
+        </div>
+        <div class="topbar-badges">
+          <span class="topbar-badge badge-purple">
+            <i class="fa-solid fa-cubes"></i> 34 Agentes
+          </span>
+          <span class="topbar-badge badge-cyan">
+            <i class="fa-solid fa-brain"></i> LLM Ativo
+          </span>
+          <span class="topbar-badge badge-green">
+            <i class="fa-solid fa-lock"></i> Vault Seguro
+          </span>
+        </div>
+      </header>
+
+      <!-- TAB: CHAT -->
+      <section id="tab-chat" class="tab-panel active">
+        <div class="chat-wrapper">
+          <div id="chat-messages" class="chat-messages">
+            <div class="welcome-message animate-in">
+              <div class="welcome-icon">
+                <i class="fa-solid fa-sparkles"></i>
+              </div>
+              <h3>Bem-vinda, Juliana</h3>
+              <p>Envie seu comando executivo, operacional ou técnico. Estou pronta para atuar.</p>
+              <div class="welcome-chips">
+                <button class="chip" data-action="quick-cmd" data-cmd="Qual o status dos meus projetos?">
+                  <i class="fa-solid fa-folder-open"></i> Status projetos
+                </button>
+                <button class="chip" data-action="quick-cmd" data-cmd="Gere o relatorio diario">
+                  <i class="fa-solid fa-chart-pie"></i> Relatório diário
+                </button>
+                <button class="chip" data-action="quick-cmd" data-cmd="Quais leads aguardam retorno?">
+                  <i class="fa-solid fa-user-clock"></i> Leads pendentes
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-input-container">
+            <form id="chat-form" class="chat-form">
+              <div class="chat-input-box">
+                <button type="button" class="input-action" title="Comando de Voz" id="btn-voice">
+                  <i class="fa-solid fa-microphone"></i>
+                </button>
+                <textarea id="chat-input" placeholder="Digite seu comando para Hermes Central..." rows="1"></textarea>
+                <button type="button" class="input-action" title="Anexar Arquivo" id="btn-attach">
+                  <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <button type="submit" id="btn-send-chat" class="send-btn" title="Enviar">
+                  <i class="fa-solid fa-paper-plane"></i>
+                </button>
+              </div>
+              <div class="input-hints">
+                <span><kbd>Enter</kbd> para enviar</span>
+                <span><kbd>Shift+Enter</kbd> nova linha</span>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: CONNECTORS -->
+      <section id="tab-connectors" class="tab-panel hidden">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-plug text-green"></i> Conectores Omnichannel</h3>
+          <p>Integrações de comunicação em tempo real</p>
+        </div>
+
+        <div class="connectors-grid">
+          <!-- WhatsApp -->
+          <div class="connector-card">
+            <div id="whatsapp-status-badge" class="connector-status connected">
+              <span class="status-dot"></span> CONECTADO
+            </div>
+            <div class="connector-icon whatsapp">
+              <i class="fa-brands fa-whatsapp"></i>
+            </div>
+            <h4>WhatsApp Multi-Number</h4>
+            <p>Baileys WebSocket Engine</p>
+            <div id="whatsapp-qr-container" class="qr-container">
+              <div id="qr-code-box" class="qr-box">
+                <i class="fa-solid fa-qrcode"></i>
+                <span>Clique para gerar QR Code</span>
+              </div>
+            </div>
+            <button id="btn-generate-qr" class="connector-btn">
+              <i class="fa-solid fa-qrcode"></i> Gerar QR Code
+            </button>
+          </div>
+
+          <!-- Telegram -->
+          <div class="connector-card">
+            <div class="connector-status connected">
+              <span class="status-dot"></span> ATIVO
+            </div>
+            <div class="connector-icon telegram">
+              <i class="fa-brands fa-telegram"></i>
+            </div>
+            <h4>Telegram Bot API</h4>
+            <p>Bot Token via @BotFather</p>
+            <div class="connector-form">
+              <div class="input-group compact">
+                <div class="input-icon"><i class="fa-solid fa-key"></i></div>
+                <input type="text" id="telegram-token-input" placeholder="7123456789:AAH_..." class="input-compact">
+              </div>
+            </div>
+            <button id="btn-save-telegram" class="connector-btn">
+              <i class="fa-solid fa-floppy-disk"></i> Salvar Token
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: VAULT -->
+      <section id="tab-vault" class="tab-panel hidden">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-vault text-amber"></i> Cofre de Tokens & Integrações</h3>
+          <p>Gerencie chaves de API com criptografia AES-256</p>
+        </div>
+
+        <div class="vault-layout">
+          <div class="vault-form-card">
+            <h4><i class="fa-solid fa-plus-circle text-accent"></i> Adicionar Token</h4>
+            <div class="input-group">
+              <label>Serviço</label>
+              <select id="vault-service-select" class="select-input">
+                <option value="clickup">ClickUp (Projetos)</option>
+                <option value="openrouter">OpenRouter (LLM)</option>
+                <option value="asaas">Asaas (Financeiro)</option>
+                <option value="telegram">Telegram Bot</option>
+                <option value="whatsapp">WhatsApp API</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>API Token</label>
+              <input type="password" id="vault-token-input" placeholder="$aAct_..." class="input-compact">
+            </div>
+            <button id="btn-save-vault-key" class="connector-btn full">
+              <i class="fa-solid fa-lock"></i> Salvar no Vault
+            </button>
+          </div>
+
+          <div class="vault-status-card">
+            <h4><i class="fa-solid fa-shield-halved text-green"></i> Status dos Serviços</h4>
+            <div id="vault-keys-list" class="vault-list">
+              <div class="vault-empty">
+                <i class="fa-solid fa-spinner fa-spin"></i> Consultando...
+              </div>
+            </div>
+          </div>
+
+          <div class="vault-status-card" style="grid-column: span 2;">
+            <h4><i class="fa-solid fa-plug text-accent"></i> Conectores Ativos</h4>
+            <div id="connectors-list" class="connectors-list">
+              <div class="vault-empty">
+                <i class="fa-solid fa-spinner fa-spin"></i> Consultando conectores...
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: CRM -->
+      <section id="tab-crm" class="tab-panel hidden">
+        <div class="panel-header crm-header">
+          <div>
+            <h3><i class="fa-solid fa-chart-line text-cyan"></i> CRM & Funil de Vendas</h3>
+            <p>Gestão de leads e oportunidades comerciais</p>
+          </div>
+          <button id="btn-add-lead-modal" class="connector-btn">
+            <i class="fa-solid fa-user-plus"></i> Novo Lead
+          </button>
+        </div>
+
+        <div class="kanban-board">
+          <div class="kanban-column" data-stage="lead_recebido">
+            <div class="kanban-col-header blue">
+              <span><i class="fa-solid fa-inbox"></i> Lead Recebido</span>
+              <span class="kanban-count" id="count-lead_recebido">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-lead_recebido"></div>
+          </div>
+          <div class="kanban-column" data-stage="reuniao_agendada">
+            <div class="kanban-col-header amber">
+              <span><i class="fa-solid fa-calendar-check"></i> Reunião</span>
+              <span class="kanban-count" id="count-reuniao_agendada">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-reuniao_agendada"></div>
+          </div>
+          <div class="kanban-column" data-stage="proposta_enviada">
+            <div class="kanban-col-header purple">
+              <span><i class="fa-solid fa-file-invoice-dollar"></i> Proposta</span>
+              <span class="kanban-count" id="count-proposta_enviada">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-proposta_enviada"></div>
+          </div>
+          <div class="kanban-column" data-stage="fechado_ganho">
+            <div class="kanban-col-header green">
+              <span><i class="fa-solid fa-trophy"></i> Fechado</span>
+              <span class="kanban-count" id="count-fechado_ganho">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-fechado_ganho"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="app.js?v=4.2.6"></script>
+</body>
+</html>

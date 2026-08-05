@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  hermes-gateway-juliana:
+    build: .
+    image: hermes-gateway-juliana:v4.2.0
+    container_name: hermes-gateway-juliana
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - NODE_ENV=production
+      - PORT=8000
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+    volumes:
+      - ./docs:/app/docs
+      - ./lib:/app/lib
+    networks:
+      - hermes-network
+
+networks:
+  hermes-network:
+    driver: bridge

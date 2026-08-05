@@ -1,0 +1,23 @@
+{
+  "name": "hermes-gateway-juliana",
+  "version": "4.2.0",
+  "description": "Hermes Central Gateway & Executive Assistant Engine for Juliana (W Soluções Tecnologia)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "test": "node --test test/*.test.js",
+    "backup": "powershell -File ./scripts/backup.ps1"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "ws": "^8.18.0",
+    "pg": "^8.12.0",
+    "ioredis": "^5.4.1",
+    "dotenv": "^16.4.5",
+    "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "sharp": "^0.33.5"
+  }
+}

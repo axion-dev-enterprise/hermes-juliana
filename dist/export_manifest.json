@@ -1,0 +1,15 @@
+{
+    "exported_at":  "2026-08-04T20:20:29.4342282-03:00",
+    "files_included":  [
+                           "public/",
+                           "prompts/",
+                           "lib/",
+                           "docs/",
+                           "server.js",
+                           "Dockerfile",
+                           "docker-compose.yml"
+                       ],
+    "git_identity":  "AXION Enterprise \u003caxionenterprise777@gmail.com\u003e",
+    "version":  "4.2.0",
+    "system":  "HERMES_GATEWAY_JULIANA"
+}

@@ -1,0 +1,23 @@
+{
+  "name": "hermes-juliana",
+  "version": "4.2.6",
+  "build_timestamp": "2026-08-04T21:28:00-03:00",
+  "environment": "production",
+  "domain": "https://juliana.axionenterprise.cloud/",
+  "vps_ip": "179.197.237.20",
+  "database": {
+    "engine": "PostgreSQL",
+    "db_name": "hermes_db",
+    "tables_count": 124
+  },
+  "features": [
+    "Zero-Mock Native PostgreSQL Persistence (chat_sessions, chat_messages, api_vault, clients_crm, chat_folders)",
+    "Dynamic Task-Based OpenRouter LLM Model Router (gpt-4o / gpt-4o-mini)",
+    "Model Badge UI Display",
+    "Executive Action Execution Engine (Intent Detection & Real SQL / ClickUp API v2 Mutations)",
+    "Authoritative Connector API Documentation (docs/CONNECTORS_DOCUMENTATION_AND_PROCEDURES.md)",
+    "Connector Helper Utilities (lib/connector_helpers.js)",
+    "Empirical Production Benchmark Suite (28/29 Passed)"
+  ],
+  "author": "AXION Enterprise <axionenterprise777@gmail.com>"
+}

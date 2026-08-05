@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>Hermes Central | W Solucoes Tecnologia</title>
+  <meta name="description" content="Painel Executivo Hermes Central - W Solucoes Tecnologia LTDA">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
+  <link rel="stylesheet" href="index.css?v=3.2.0">
+</head>
+<body>
+
+  <!-- ANIMATED BACKGROUND PARTICLES -->
+  <div class="bg-particles" id="bg-particles"></div>
+
+  <!-- LOGIN SCREEN -->
+  <div id="login-modal" class="login-screen">
+    <div class="login-backdrop"></div>
+    <div class="login-card" id="login-card">
+      <div class="login-glow"></div>
+      <div class="login-brand">
+        <div class="login-logo">
+          <div class="logo-ring">
+            <div class="logo-inner">
+              <i class="fa-solid fa-bolt"></i>
+            </div>
+          </div>
+          <div class="logo-pulse"></div>
+        </div>
+        <h1 class="login-title">HERMES<span class="text-accent">CENTRAL</span></h1>
+        <p class="login-subtitle">W Solucoes Tecnologia LTDA</p>
+      </div>
+
+      <form id="login-form" class="login-form">
+        <div class="input-group">
+          <div class="input-icon"><i class="fa-solid fa-envelope"></i></div>
+          <input type="email" id="login-email" value="juliana@wsolucoes.com.br" required placeholder=" " autocomplete="email">
+          <label class="input-label">E-mail Executivo</label>
+          <div class="input-line"></div>
+        </div>
+        <div class="input-group">
+          <div class="input-icon"><i class="fa-solid fa-lock"></i></div>
+          <input type="password" id="login-password" value="JulianaWsolu2026Secure!" required placeholder=" " autocomplete="current-password">
+          <label class="input-label">Senha de Acesso</label>
+          <div class="input-line"></div>
+        </div>
+        <div id="login-error" class="login-error hidden"></div>
+        <button type="submit" id="btn-login-submit" class="login-btn">
+          <span class="btn-text">Entrar no Painel</span>
+          <span class="btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+          <div class="btn-shimmer"></div>
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <div class="security-badge">
+          <i class="fa-solid fa-shield-halved"></i>
+          <span>Conexao Segura AES-256</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MAIN APPLICATION -->
+  <div id="app-container" class="app-container hidden">
+
+    <!-- SIDEBAR -->
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-bolt"></i>
+        </div>
+        <div class="brand-text">
+          <span class="brand-name">HERMES<span class="text-accent">CENTRAL</span></span>
+          <span class="brand-company">W Solucoes Tecnologia</span>
+        </div>
+      </div>
+
+      <!-- THEME SWITCHER -->
+      <div class="theme-switcher">
+        <button class="theme-btn active" data-theme="dark" title="Midnight">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+        <button class="theme-btn" data-theme="light" title="Light">
+          <i class="fa-solid fa-sun"></i>
+        </button>
+        <button class="theme-btn" data-theme="emerald" title="Emerald">
+          <i class="fa-solid fa-gem"></i>
+        </button>
+        <button class="theme-btn" data-theme="amethyst" title="Amethyst">
+          <i class="fa-solid fa-star"></i>
+        </button>
+      </div>
+
+      <!-- NAVIGATION -->
+      <nav class="sidebar-nav">
+        <button class="nav-item active" data-tab="tab-chat">
+          <div class="nav-icon"><i class="fa-solid fa-comments"></i></div>
+          <span>Chat Executivo</span>
+          <div class="nav-active-indicator"></div>
+        </button>
+        <button class="nav-item" data-tab="tab-connectors">
+          <div class="nav-icon"><i class="fa-solid fa-plug"></i></div>
+          <span>Conectores</span>
+        </button>
+        <button class="nav-item" data-tab="tab-vault">
+          <div class="nav-icon"><i class="fa-solid fa-vault"></i></div>
+          <span>Cofre de Chaves</span>
+        </button>
+        <button class="nav-item" data-tab="tab-crm">
+          <div class="nav-icon"><i class="fa-solid fa-chart-line"></i></div>
+          <span>CRM & Funil</span>
+        </button>
+      </nav>
+
+      <!-- NEW CHAT -->
+      <button id="btn-new-chat" class="new-chat-btn">
+        <i class="fa-solid fa-plus"></i>
+        <span>Nova Conversa</span>
+      </button>
+
+      <!-- SESSIONS -->
+      <div class="sessions-container">
+        <div class="sessions-header">
+          <span class="sessions-title"><i class="fa-solid fa-clock-rotate-left"></i> Historico</span>
+          <button id="btn-toggle-archived" class="sessions-filter">
+            <i class="fa-solid fa-filter"></i>
+          </button>
+        </div>
+        <div class="sessions-toolbar">
+          <button class="sessions-tool-btn" onclick="createFolder()" title="Nova Pasta">
+            <i class="fa-solid fa-folder-plus"></i>
+          </button>
+          <button class="sessions-tool-btn" onclick="toggleArchived()" title="Arquivados">
+            <i class="fa-solid fa-box-archive"></i>
+          </button>
+        </div>
+        <div id="sessions-list" class="sessions-list">
+          <div class="sessions-empty">
+            <i class="fa-solid fa-inbox"></i>
+            <span>Nenhuma sessao</span>
+          </div>
+        </div>
+        <div id="archived-panel" class="archived-panel" style="display:none">
+          <div class="archived-header"><i class="fa-solid fa-box-archive"></i> Arquivados</div>
+          <div id="archived-list"></div>
+        </div>
+      </div>
+
+      <!-- SIDEBAR FOOTER -->
+      <div class="sidebar-footer">
+        <div class="status-card">
+          <div class="status-row">
+            <span class="status-dot online"></span>
+            <span class="status-text">VPS Online</span>
+          </div>
+          <div class="status-detail">
+            <i class="fa-solid fa-microchip"></i> OpenRouter Free
+          </div>
+          <div class="status-row ws-row">
+            <i class="fa-solid fa-bolt text-yellow"></i>
+            <span id="ws-status-text">WebSocket Ativo</span>
+          </div>
+        </div>
+        <div class="user-card">
+          <div class="user-avatar">J</div>
+          <div class="user-info">
+            <span class="user-name">Juliana</span>
+            <span class="user-role">Executiva</span>
+          </div>
+          <button id="btn-logout" class="logout-btn" title="Sair">
+            <i class="fa-solid fa-right-from-bracket"></i>
+          </button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN CONTENT -->
+    <main class="main-content">
+
+      <!-- TOPBAR -->
+      <header class="topbar">
+        <div class="topbar-left">
+          <button class="mobile-menu-btn" id="mobile-menu-btn">
+            <i class="fa-solid fa-bars"></i>
+          </button>
+          <div class="topbar-info">
+            <h2><i class="fa-solid fa-bolt text-accent"></i> Agente Central Executivo</h2>
+            <p>Assistente inteligente com 34 sub-agentes especializados</p>
+          </div>
+        </div>
+        <div class="topbar-badges">
+          <span class="topbar-badge badge-purple">
+            <i class="fa-solid fa-cubes"></i> 34 Agentes
+          </span>
+          <span class="topbar-badge badge-cyan">
+            <i class="fa-solid fa-brain"></i> LLM Ativo
+          </span>
+          <span class="topbar-badge badge-green">
+            <i class="fa-solid fa-lock"></i> Vault Seguro
+          </span>
+        </div>
+      </header>
+
+      <!-- TAB: CHAT -->
+      <section id="tab-chat" class="tab-panel active">
+        <div class="chat-wrapper">
+          <div id="chat-messages" class="chat-messages">
+            <div class="welcome-message animate-in">
+              <div class="welcome-icon">
+                <i class="fa-solid fa-sparkles"></i>
+              </div>
+              <h3>Bem-vinda, Juliana</h3>
+              <p>Envie seu comando executivo, operacional ou tecnico. Estou pronta para atuar.</p>
+              <div class="welcome-chips">
+                <button class="chip" onclick="sendQuickCommand('Qual o status dos meus projetos?')">
+                  <i class="fa-solid fa-folder-open"></i> Status projetos
+                </button>
+                <button class="chip" onclick="sendQuickCommand('Gere o relatorio diario')">
+                  <i class="fa-solid fa-chart-pie"></i> Relatorio diario
+                </button>
+                <button class="chip" onclick="sendQuickCommand('Quais leads aguardam retorno?')">
+                  <i class="fa-solid fa-user-clock"></i> Leads pendentes
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="chat-input-container">
+            <form id="chat-form" class="chat-form">
+              <div class="chat-input-box">
+                <button type="button" class="input-action" title="Comando de Voz" id="btn-voice">
+                  <i class="fa-solid fa-microphone"></i>
+                </button>
+                <textarea id="chat-input" placeholder="Digite seu comando para Hermes Central..." rows="1"></textarea>
+                <button type="button" class="input-action" title="Anexar Arquivo" id="btn-attach">
+                  <i class="fa-solid fa-paperclip"></i>
+                </button>
+                <button type="submit" id="btn-send-chat" class="send-btn" title="Enviar">
+                  <i class="fa-solid fa-paper-plane"></i>
+                </button>
+              </div>
+              <div class="input-hints">
+                <span><kbd>Enter</kbd> para enviar</span>
+                <span><kbd>Shift+Enter</kbd> nova linha</span>
+              </div>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: CONNECTORS -->
+      <section id="tab-connectors" class="tab-panel hidden">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-plug text-green"></i> Conectores Omnichannel</h3>
+          <p>Integracoes de comunicacao em tempo real</p>
+        </div>
+
+        <div class="connectors-grid">
+          <!-- WhatsApp -->
+          <div class="connector-card">
+            <div id="whatsapp-status-badge" class="connector-status offline">
+              <span class="status-dot"></span> Verificando...
+            </div>
+            <div class="connector-icon whatsapp">
+              <i class="fa-brands fa-whatsapp"></i>
+            </div>
+            <h4>WhatsApp Multi-Number</h4>
+            <p>Baileys WebSocket Engine</p>
+            <div id="whatsapp-qr-container" class="qr-container">
+              <div id="qr-code-box" class="qr-box">
+                <i class="fa-solid fa-qrcode"></i>
+                <span>Clique para gerar QR Code</span>
+              </div>
+            </div>
+            <button id="btn-generate-qr" class="connector-btn">
+              <i class="fa-solid fa-qrcode"></i> Gerar QR Code
+            </button>
+          </div>
+
+          <!-- Telegram -->
+          <div class="connector-card">
+            <div class="connector-status">
+              <span class="status-dot"></span> Configurar
+            </div>
+            <div class="connector-icon telegram">
+              <i class="fa-brands fa-telegram"></i>
+            </div>
+            <h4>Telegram Bot API</h4>
+            <p>Bot Token via @BotFather</p>
+            <div class="connector-form">
+              <div class="input-group compact">
+                <div class="input-icon"><i class="fa-solid fa-key"></i></div>
+                <input type="text" id="telegram-token-input" placeholder="7123456789:AAH_..." class="input-compact">
+              </div>
+            </div>
+            <button id="btn-save-telegram" class="connector-btn">
+              <i class="fa-solid fa-floppy-disk"></i> Salvar Token
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: VAULT -->
+      <section id="tab-vault" class="tab-panel hidden">
+        <div class="panel-header">
+          <h3><i class="fa-solid fa-vault text-amber"></i> Cofre de Tokens & Integracoes</h3>
+          <p>Gerencie chaves de API com criptografia AES-256</p>
+        </div>
+
+        <div class="vault-layout">
+          <div class="vault-form-card">
+            <h4><i class="fa-solid fa-plus-circle text-accent"></i> Adicionar Token</h4>
+            <div class="input-group">
+              <label>Servico</label>
+              <select id="vault-service-select" class="select-input">
+                <option value="asaas">Asaas (Financeiro)</option>
+                <option value="clickup">ClickUp (Projetos)</option>
+                <option value="authentique">Authentique (Contratos)</option>
+                <option value="meta">Meta Ads</option>
+                <option value="telegram">Telegram Bot</option>
+                <option value="whatsapp">WhatsApp API</option>
+              </select>
+            </div>
+            <div class="input-group">
+              <label>API Token</label>
+              <input type="password" id="vault-token-input" placeholder="$aAct_..." class="input-compact">
+            </div>
+            <button id="btn-save-vault-key" class="connector-btn full">
+              <i class="fa-solid fa-lock"></i> Salvar no Vault
+            </button>
+          </div>
+
+          <div class="vault-status-card">
+            <h4><i class="fa-solid fa-shield-halved text-green"></i> Status dos Servicos</h4>
+            <div id="vault-keys-list" class="vault-list">
+              <div class="vault-empty">
+                <i class="fa-solid fa-spinner fa-spin"></i> Consultando...
+              </div>
+            </div>
+          </div>
+
+          <div class="vault-status-card" style="grid-column: span 2;">
+            <h4><i class="fa-solid fa-plug text-accent"></i> Conectores Ativos</h4>
+            <div id="connectors-list" class="connectors-list">
+              <div class="vault-empty">
+                <i class="fa-solid fa-spinner fa-spin"></i> Consultando conectores...
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB: CRM -->
+      <section id="tab-crm" class="tab-panel hidden">
+        <div class="panel-header crm-header">
+          <div>
+            <h3><i class="fa-solid fa-chart-line text-cyan"></i> CRM & Funil de Vendas</h3>
+            <p>Gestao de leads e oportunidades comerciais</p>
+          </div>
+          <button id="btn-add-lead-modal" class="connector-btn">
+            <i class="fa-solid fa-user-plus"></i> Novo Lead
+          </button>
+        </div>
+
+        <div class="kanban-board">
+          <div class="kanban-column" data-stage="lead_recebido">
+            <div class="kanban-col-header blue">
+              <span><i class="fa-solid fa-inbox"></i> Lead Recebido</span>
+              <span class="kanban-count" id="count-lead_recebido">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-lead_recebido"></div>
+          </div>
+          <div class="kanban-column" data-stage="reuniao_agendada">
+            <div class="kanban-col-header amber">
+              <span><i class="fa-solid fa-calendar-check"></i> Reuniao</span>
+              <span class="kanban-count" id="count-reuniao_agendada">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-reuniao_agendada"></div>
+          </div>
+          <div class="kanban-column" data-stage="proposta_enviada">
+            <div class="kanban-col-header purple">
+              <span><i class="fa-solid fa-file-invoice-dollar"></i> Proposta</span>
+              <span class="kanban-count" id="count-proposta_enviada">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-proposta_enviada"></div>
+          </div>
+          <div class="kanban-column" data-stage="fechado_ganho">
+            <div class="kanban-col-header green">
+              <span><i class="fa-solid fa-trophy"></i> Fechado</span>
+              <span class="kanban-count" id="count-fechado_ganho">0</span>
+            </div>
+            <div class="kanban-cards" id="cards-fechado_ganho"></div>
+          </div>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <script src="app.js?v=3.2.0"></script>
+</body>
+</html>
