@@ -1528,6 +1528,14 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
-server.listen(PORT, () => {
-  console.log(`[HERMES CENTRAL JULIANA] Full Engine running on port ${PORT}`);
-});
+function startServer(port = PORT) {
+  if (server.listening) return Promise.resolve(server);
+  return new Promise((resolve) => server.listen(port, () => {
+    console.log(`[HERMES CENTRAL JULIANA] Full Engine running on port ${port}`);
+    resolve(server);
+  }));
+}
+
+if (require.main === module) startServer();
+
+module.exports = { app, server, startServer };

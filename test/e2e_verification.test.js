@@ -12,11 +12,13 @@ const integrationsKb = require('../lib/integrations_kb.json');
 
 test('Hermes Juliana - E2E Integration Suite', async (t) => {
   // Start server on dynamic port
-  const serverModule = require('../server.js');
+  const { server, startServer } = require('../server.js');
   
   // Test REST API & Static Files via HTTP
   const PORT = process.env.PORT || 8000;
   const baseUrl = `http://localhost:${PORT}`;
+  await startServer(PORT);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
 
   await t.test('GET /api/v1/health', async () => {
     const res = await fetch(`${baseUrl}/api/v1/health`);
@@ -135,6 +137,6 @@ test('Hermes Juliana - E2E Integration Suite', async (t) => {
     assert.strictEqual(res.status, 200);
     const html = await res.text();
     assert.ok(html.includes('<title>Hermes Central | W Soluções Tecnologia</title>'));
-    assert.ok(html.includes('app.js?v=4.2.6'));
+    assert.ok(html.includes('app.js?v=5.2.0'));
   });
 });
