@@ -83,6 +83,31 @@ let connectorsStatusStore = {
   clickup: { connected: false, workspace: null }
 };
 
+// PER-SENDER WHATSAPP CONVERSATION HISTORY
+// Keeps last 10 turns per contact. Cleared after 30min of inactivity.
+const whatsappConvHistory = new Map(); // sender -> [{ role, content }]
+const whatsappConvTimestamps = new Map(); // sender -> Date.now()
+const WA_HISTORY_LIMIT = 10;  // max turns kept
+const WA_HISTORY_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+function getWhatsAppHistory(sender) {
+  const now = Date.now();
+  const lastTs = whatsappConvTimestamps.get(sender) || 0;
+  if (now - lastTs > WA_HISTORY_TTL_MS) {
+    whatsappConvHistory.delete(sender);
+  }
+  return whatsappConvHistory.get(sender) || [];
+}
+
+function appendWhatsAppHistory(sender, role, content) {
+  const history = getWhatsAppHistory(sender);
+  history.push({ role, content });
+  // Keep only last WA_HISTORY_LIMIT turns
+  if (history.length > WA_HISTORY_LIMIT * 2) history.splice(0, 2);
+  whatsappConvHistory.set(sender, history);
+  whatsappConvTimestamps.set(sender, Date.now());
+}
+
 // -------------------------------------------------------------
 // WEBSOCKET SERVER INTEGRATION (/ws)
 // -------------------------------------------------------------
@@ -465,26 +490,77 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
     console.log(`[WHATSAPP WEBHOOK] Routing message from ${pushName || sender} to Juliana LLM...`);
     try {
       const routing = selectOptimalModel(message, 'EXECUTIVE');
-      const whatsappCtx = `\n\n### MENSAGEM RECEBIDA VIA WHATSAPP:\n- Remetente: ${pushName || 'Contato WhatsApp'} (${sender})\n- Canal: WhatsApp\n- Instrução: Responda de forma profissional, concisa e representativa da W Soluções Tecnologia.`;
-      const fullPrompt = await buildFullSystemPrompt('EXECUTIVE', whatsappCtx);
+
+      // Retrieve conversation history for context
+      const history = getWhatsAppHistory(sender);
+      appendWhatsAppHistory(sender, 'user', message);
+
+      const whatsappCtx = `
+
+### CANAL: WHATSAPP
+- Remetente: ${pushName || 'Contato WhatsApp'} (${sender})
+- Este é um atendimento via WhatsApp a um cliente ou contato externo.
+
+### REGRAS DE FORMATO OBRIGATÓRIAS PARA WHATSAPP:
+- NÃO use headers Markdown (##, ###). NÃO use tabelas (|col|). NÃO use ---.
+- Use *texto* para negrito e _texto_ para itálico (formato nativo WhatsApp).
+- Use listas simples com • ou números. Respostas curtas e diretas.
+- Seja profissional, acolhedora e representativa da W Soluções Tecnologia.`;
+
+      // Build system prompt with real context
+      const fullSystemPrompt = await buildFullSystemPrompt('EXECUTIVE', whatsappCtx);
+
+      // Build messages array with conversation history
+      const llmMessages = [
+        { role: 'system', content: fullSystemPrompt },
+        ...history.slice(-WA_HISTORY_LIMIT * 2), // inject last N turns for context
+        { role: 'user', content: message }
+      ];
+
+      // Call LLM with full history context
+      const keys = await getRealVaultKeys();
+      const openrouterKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
+      const apiKey = process.env.OPENROUTER_API_KEY || openrouterKey;
 
       let reply = null;
       const modelsToTry = [routing.primary, ...routing.fallbacks];
       for (const model of modelsToTry) {
         try {
-          reply = await callLLM(model, fullPrompt, message, routing.complexity === 'HEAVY' ? 2000 : 1200);
-          console.log(`[WHATSAPP WEBHOOK] LLM replied via ${model}: ${reply.substring(0, 80)}...`);
-          break;
+          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
+              'X-Title': 'Hermes Central Juliana WhatsApp'
+            },
+            body: JSON.stringify({
+              model,
+              max_tokens: routing.complexity === 'HEAVY' ? 2000 : 1200,
+              messages: llmMessages
+            })
+          });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const data = await response.json();
+          reply = data.choices?.[0]?.message?.content;
+          if (reply) {
+            console.log(`[WHATSAPP WEBHOOK] LLM replied via ${model}: ${reply.substring(0, 80)}...`);
+            break;
+          }
         } catch (modelErr) {
           console.warn(`[WHATSAPP WEBHOOK] Model ${model} failed:`, modelErr.message);
         }
       }
 
       if (!reply) throw new Error('All LLM models failed');
+
+      // Save assistant reply to history
+      appendWhatsAppHistory(sender, 'assistant', reply);
+
       return res.json({ reply });
     } catch (err) {
       console.error('[WHATSAPP AGENT REPLY ERR]:', err.message);
-      return res.json({ reply: 'Olá! Sou a Juliana da W Soluções Tecnologia. No momento estou com instabilidade. Por favor, tente novamente em instantes.' });
+      return res.json({ reply: 'Olá! Sou a Juliana da W Soluções. No momento estou com instabilidade técnica. Por favor, tente novamente em instantes.' });
     }
   }
 
