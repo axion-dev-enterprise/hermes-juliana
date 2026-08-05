@@ -612,7 +612,6 @@ app.post('/api/v1/agent/chat', async (req, res) => {
     }
   }
 
-  const realKeys = await getRealVaultKeys();
   const realClickUpTasks = await fetchRealClickUpTasks();
   const connectorDocsContext = loadConnectorDocs();
 
