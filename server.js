@@ -1274,7 +1274,35 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
 
     if (response.ok) {
       const data = await response.json();
-      if (data.choices?.[0]?.message) return data.choices[0].message;
+      const msg = data.choices?.[0]?.message;
+      if (msg) {
+        const hasContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
+        const hasTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+        if (hasContent || hasTools) return msg;
+
+        // If content is empty/null and no tool calls triggered, retry payload without tools array
+        if (tools && tools.length) {
+          console.warn(`[LLM CALL WARN] Model ${modelName} returned empty content with tools enabled. Retrying without tools...`);
+          const noToolsPayload = { model: modelName, max_tokens: maxTokens || 1200, messages };
+          const retryRes = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
+              'X-Title': 'Hermes Central Juliana Retry'
+            },
+            body: JSON.stringify(noToolsPayload)
+          });
+          if (retryRes.ok) {
+            const retryData = await retryRes.json();
+            const retryMsg = retryData.choices?.[0]?.message;
+            if (retryMsg && typeof retryMsg.content === 'string' && retryMsg.content.trim().length > 0) {
+              return retryMsg;
+            }
+          }
+        }
+      }
     } else {
       const errText = await response.text();
       console.warn(`[LLM CALL WARN] Primary endpoint (${endpoint}) returned ${response.status}: ${errText.substring(0, 150)}`);
@@ -1286,6 +1314,12 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
   // Fallback to OpenRouter if primary Nous call fails and OpenRouter key exists
   if (openrouterKey && endpoint !== OPENROUTER_ENDPOINT) {
     try {
+      const fbPayload = {
+        model: 'openai/gpt-4o-mini',
+        max_tokens: maxTokens || 1200,
+        messages: messages.map(m => m.role === 'tool' ? { role: 'user', content: `[RESULTADO DA FERRAMENTA]: ${m.content}` } : m),
+        ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {})
+      };
       const fbResponse = await fetch(OPENROUTER_ENDPOINT, {
         method: 'POST',
         headers: {
@@ -1294,16 +1328,12 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
           'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
           'X-Title': 'Hermes Central Juliana Fallback'
         },
-        body: JSON.stringify({
-          model: 'openai/gpt-4o-mini',
-          max_tokens: maxTokens || 1200,
-          messages,
-          ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {})
-        })
+        body: JSON.stringify(fbPayload)
       });
       if (fbResponse.ok) {
         const fbData = await fbResponse.json();
-        if (fbData.choices?.[0]?.message) return fbData.choices[0].message;
+        const fbMsg = fbData.choices?.[0]?.message;
+        if (fbMsg && (fbMsg.content || fbMsg.tool_calls)) return fbMsg;
       }
     } catch (fbErr) {
       console.warn(`[LLM FALLBACK WARN] OpenRouter fallback failed: ${fbErr.message}`);
@@ -1619,16 +1649,20 @@ ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Do
       autonomyAuthorized ? TOOL_DEFINITIONS : []
     );
 
-    for (let turn = 0; turn < 5 && Array.isArray(message.tool_calls) && message.tool_calls.length; turn += 1) {
+    const executedToolLogs = [];
+
+    for (let turn = 0; turn < 5 && Array.isArray(message?.tool_calls) && message.tool_calls.length; turn += 1) {
       messages.push(message);
       for (const toolCall of message.tool_calls) {
         let result;
         try {
           console.log(`[AUTONOMY TOOL CALL] Executing tool: ${toolCall.function.name} with args:`, toolCall.function.arguments);
           result = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), realKeys);
+          executedToolLogs.push(`✅ Ação executada (${toolCall.function.name}): ${JSON.stringify(result)}`);
         } catch (toolError) {
           console.warn(`[AUTONOMY TOOL ERR] Tool ${toolCall.function.name} failed:`, toolError.message);
           result = { error: toolError.message };
+          executedToolLogs.push(`⚠️ Falha na ação (${toolCall.function.name}): ${toolError.message}`);
         }
         messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
       }
@@ -1639,7 +1673,16 @@ ${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Do
         autonomyAuthorized ? TOOL_DEFINITIONS : []
       );
     }
-    return message.content || 'Ação executada com sucesso e registradas evidências no ecossistema.';
+
+    if (message && typeof message.content === 'string' && message.content.trim().length > 0) {
+      return message.content;
+    }
+
+    if (executedToolLogs.length > 0) {
+      return `### Ações Executadas no Ecossistema:\n\n${executedToolLogs.join('\n\n')}`;
+    }
+
+    throw new Error(`Modelo ${modelName} retornou resposta vazia ou nula.`);
   };
 
   try {
