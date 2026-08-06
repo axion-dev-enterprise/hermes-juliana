@@ -1461,39 +1461,49 @@ async function executeExecutiveActionMandate(message) {
   // 3. CREATE CLICKUP TASK (e.g. "crie a tarefa Otimização SEO no ClickUp")
   if ((msgLower.includes('crie') || msgLower.includes('criar')) && msgLower.includes('tarefa') && msgLower.includes('clickup')) {
     try {
-      const taskNameMatch = message.match(/tarefa ["']?([^"']+)["']?/i);
+      const taskNameMatch = message.match(/(?:tarefa|task)\s+["']?([^"'\n]+)["']?/i);
+      const taskName = taskNameMatch ? taskNameMatch[1] : (message.replace(/crie|criar|tarefa|clickup/gi, '').trim() || 'Auditoria de Performance');
+      
       const keys = await getRealVaultKeys();
       const clickupKeyObj = keys.find(k => k.service.toLowerCase().includes('clickup'));
       const apiKey = clickupKeyObj ? clickupKeyObj.rawToken : process.env.CLICKUP_API_KEY;
       const teamId = process.env.CLICKUP_TEAM_ID || '90133016156';
-      const teamsRes = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/space`, {
-        headers: { 'Authorization': apiKey }
-      });
-      if (teamsRes.ok) {
-        const spaceData = await teamsRes.json();
-        const firstSpace = spaceData.spaces && spaceData.spaces[0];
-        if (firstSpace) {
-          const folderRes = await fetch(`https://api.clickup.com/api/v2/space/${firstSpace.id}/list`, {
-            headers: { 'Authorization': apiKey }
-          });
-          if (folderRes.ok) {
-            const listData = await folderRes.json();
-            const firstList = listData.lists && listData.lists[0];
-            if (firstList) {
-              const createTaskRes = await fetch(`https://api.clickup.com/api/v2/list/${firstList.id}/task`, {
-                method: 'POST',
-                headers: {
-                  'Authorization': apiKey,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  name: taskName,
-                  description: 'Tarefa criada automaticamente via comando executivo da Juliana no Hermes Central.'
-                })
-              });
-              if (createTaskRes.ok) {
-                const createdTask = await createTaskRes.json();
-                actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO CLICKUP API v2]: Tarefa **"${createdTask.name}"** (ID: ${createdTask.id}) criada com sucesso no ClickUp! URL: ${createdTask.url}`);
+
+      if (!apiKey) {
+        actionsTaken.push('⚠️ [AUTONOMIA CLICKUP]: A chave de API do ClickUp não foi encontrada no Vault.');
+      } else {
+        const teamsRes = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/space`, {
+          headers: { 'Authorization': apiKey }
+        });
+        if (teamsRes.ok) {
+          const spaceData = await teamsRes.json();
+          const firstSpace = spaceData.spaces && spaceData.spaces[0];
+          if (firstSpace) {
+            const folderRes = await fetch(`https://api.clickup.com/api/v2/space/${firstSpace.id}/list`, {
+              headers: { 'Authorization': apiKey }
+            });
+            if (folderRes.ok) {
+              const listData = await folderRes.json();
+              const firstList = listData.lists && listData.lists[0];
+              if (firstList) {
+                const createTaskRes = await fetch(`https://api.clickup.com/api/v2/list/${firstList.id}/task`, {
+                  method: 'POST',
+                  headers: {
+                    'Authorization': apiKey,
+                    'Content-Type': 'application/json'
+                  },
+                  body: JSON.stringify({
+                    name: taskName,
+                    description: 'Tarefa criada automaticamente via comando executivo da Juliana no Hermes Central.'
+                  })
+                });
+                if (createTaskRes.ok) {
+                  const createdTask = await createTaskRes.json();
+                  actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO CLICKUP API v2]: Tarefa **"${createdTask.name}"** (ID: ${createdTask.id}) criada com sucesso no ClickUp! URL: ${createdTask.url}`);
+                } else {
+                  const errText = await createTaskRes.text();
+                  actionsTaken.push(`⚠️ [FALHA NA AÇÃO CLICKUP]: ClickUp HTTP ${createTaskRes.status}: ${errText.substring(0, 150)}`);
+                }
               }
             }
           }
@@ -1501,6 +1511,7 @@ async function executeExecutiveActionMandate(message) {
       }
     } catch (clickupErr) {
       console.error('[ACTION ENGINE CLICKUP ERROR]:', clickupErr.message);
+      actionsTaken.push(`⚠️ [FALHA NA AÇÃO CLICKUP]: ${clickupErr.message}`);
     }
   }
 
