@@ -1367,7 +1367,7 @@ async function buildFullSystemPrompt(mode, extraContext) {
 
   const tasksContext = realClickUpTasks || '- Nenhuma tarefa retornada pela ClickUp API no momento.';
 
-  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (DADOS 100% REAIS):\n${extraContext || ''}\n[CHAVES E SERVIÇOS NO VAULT]:\n${vaultSummary}\n\n[TAREFAS REAIS NO CLICKUP]:\n${tasksContext}\n\n[PIPELINE E LEADS NO CRM]:\n${crmSummary}\n\n[DOCUMENTAÇÕES DOS CONECTORES]:\n${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Documentação técnica carregada.'}\n\n### INSTRUÇÕES OBRIGATÓRIAS:\n- NUNCA alucine ou invente dados fictícios.\n- Responda de forma executiva, objetiva e direta.\n- Quando falar com contatos externos via WhatsApp, seja profissional e representativa da W Soluções.`;
+  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (DADOS 100% REAIS):\n${extraContext || ''}\n[CHAVES E SERVIÇOS NO VAULT]:\n${vaultSummary}\n\n[TAREFAS REAIS NO CLICKUP]:\n${tasksContext}\n\n[PIPELINE E LEADS NO CRM]:\n${crmSummary}\n\n[DOCUMENTAÇÕES DOS CONECTORES]:\n${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}\n\n### INSTRUÇÕES OBRIGATÓRIAS:\n- NUNCA alucine ou invente dados fictícios.\n- Responda de forma executiva, objetiva e direta.\n- Quando falar com contatos externos via WhatsApp, seja profissional e representativa da W Soluções.`;
 
   const modeInstruction = MODES?.[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${MODES[mode]}` : '';
   return `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
@@ -1623,7 +1623,7 @@ ${tasksContext}
 ${crmSummary}
 
 [DOCUMENTAÇÕES E PROCEDIMENTOS OFICIAIS DE API DOS CONECTORES (docs/CONNECTORS_DOCUMENTATION_AND_PROCEDURES.md)]:
-${connectorDocsContext ? connectorDocsContext.substring(0, 1800) + '...' : '- Documentação técnica carregada dos conectores.'}
+${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
 
 ### INSTRUÇÕES OBRIGATÓRIAS PARA A HERMES CENTRAL JULIANA:
 - Autonomia e ferramentas (Tools) estão 100% habilitadas e ativas via Nous Portal API.
