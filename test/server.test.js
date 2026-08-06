@@ -12,9 +12,9 @@ test('Hermes Juliana - System Prompt Verification', () => {
 
 test('Hermes Juliana - Integrations KB JSON Schema', () => {
   const kb = require('../lib/integrations_kb.json');
-  assert.strictEqual(kb.system, 'HERMES_INTEGRATIONS_KB_V4.2');
+  assert.strictEqual(kb.system, 'HERMES_INTEGRATIONS_KB_V5.0');
   assert.ok(Array.isArray(kb.integrations));
-  assert.ok(kb.integrations.length >= 7);
+  assert.ok(kb.integrations.length >= 60);
 });
 
 test('Hermes Juliana - Frontend Assets Presence', () => {
