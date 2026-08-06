@@ -1555,6 +1555,133 @@ async function executeExecutiveActionMandate(message) {
     }
   }
 
+  // 5. CREATE GITHUB REPOSITORY (e.g. "crie repositório", "crie repo github", "criar repositório no github")
+  if (
+    (msgLower.includes('crie') || msgLower.includes('criar') || msgLower.includes('cria')) &&
+    (msgLower.includes('repositório') || msgLower.includes('repositorio') || msgLower.includes('repo')) &&
+    (msgLower.includes('github') || msgLower.includes('git'))
+  ) {
+    try {
+      const keys = await getRealVaultKeys();
+      const githubKeyObj = keys.find(k => k.service.toLowerCase().includes('github'));
+      const token = githubKeyObj?.rawToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+
+      if (!token) {
+        actionsTaken.push('⚠️ [AUTONOMIA GITHUB]: Token do GitHub não encontrado no Vault. Configure em: salve a chave github <token>');
+      } else {
+        // Extract repo name from message
+        const repoNameMatch = message.match(/(?:reposit[oó]rio|repo)\s+["']?([\w\-\.]+)["']?/i);
+        const repoName = repoNameMatch ? repoNameMatch[1].toLowerCase().replace(/\s+/g, '-') : 'repositorio-hermes-juliana';
+        const isPrivate = !msgLower.includes('público') && !msgLower.includes('publico');
+
+        const ghRes = await fetch('https://api.github.com/user/repos', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/vnd.github+json',
+            'Authorization': `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: repoName,
+            description: 'Repositório criado automaticamente pelo motor de Autonomia Hermes Central Juliana.',
+            private: isPrivate,
+            auto_init: true
+          })
+        });
+
+        if (ghRes.ok) {
+          const repo = await ghRes.json();
+          actionsTaken.push(
+            `✅ [AÇÃO REAL EXECUTADA NO GITHUB REST API]: Repositório **${repo.full_name}** criado com sucesso!\n` +
+            `- URL: ${repo.html_url}\n` +
+            `- Visibilidade: ${repo.private ? 'Privado 🔒' : 'Público 🌐'}\n` +
+            `- Clone SSH: \`${repo.ssh_url}\`\n` +
+            `- Clone HTTPS: \`${repo.clone_url}\``
+          );
+        } else {
+          const errBody = await ghRes.json().catch(() => ({ message: 'Erro desconhecido' }));
+          if (ghRes.status === 422 && errBody.errors?.some(e => e.message?.includes('already exists'))) {
+            actionsTaken.push(`⚠️ [GITHUB API]: O repositório "${repoName}" já existe nesta conta. Utilize outro nome ou acesse-o diretamente.`);
+          } else {
+            actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB CREATE REPO]: HTTP ${ghRes.status} — ${errBody.message || JSON.stringify(errBody).substring(0, 200)}`);
+          }
+        }
+      }
+    } catch (ghRepoErr) {
+      actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB CREATE REPO]: ${ghRepoErr.message}`);
+    }
+  }
+
+  // 6. VERCEL DEPLOY (e.g. "deploy no vercel", "fazer deploy", "publique no vercel")
+  if (
+    (msgLower.includes('deploy') || msgLower.includes('publicar') || msgLower.includes('publique') || msgLower.includes('hospedar')) &&
+    (msgLower.includes('vercel') || msgLower.includes('landing') || msgLower.includes('site'))
+  ) {
+    try {
+      const keys = await getRealVaultKeys();
+      const vercelKeyObj = keys.find(k => k.service.toLowerCase().includes('vercel'));
+      const vercelToken = vercelKeyObj?.rawToken || process.env.VERCEL_TOKEN;
+
+      if (!vercelToken) {
+        actionsTaken.push('⚠️ [AUTONOMIA VERCEL]: Token do Vercel não encontrado no Vault. Configure em: salve a chave vercel <token>');
+      } else {
+        // Extract project name from message
+        const projectNameMatch = message.match(/(?:projeto|project|landing|site|página)\s+["']?([\w\-\.]+)["']?/i);
+        const projectName = projectNameMatch ? projectNameMatch[1].toLowerCase().replace(/\s+/g, '-') : `hermes-deploy-${Date.now()}`;
+
+        // Create minimal HTML landing page files
+        const indexHtml = `<!DOCTYPE html>\n<html lang="pt-BR">\n<head>\n<meta charset="UTF-8"/>\n<meta name="viewport" content="width=device-width, initial-scale=1.0"/>\n<title>${projectName}</title>\n<style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a,#1e293b);color:#f8fafc}.card{background:#1e293b;border:1px solid #334155;border-radius:1rem;padding:3rem;text-align:center;max-width:600px}h1{font-size:2rem;color:#38bdf8;margin-bottom:.5rem}p{color:#94a3b8}</style>\n</head>\n<body><div class="card"><h1>${projectName}</h1><p>Deployed via Hermes Central Juliana — AXION Enterprise</p><p style="margin-top:1rem;font-size:.8rem;color:#64748b">${new Date().toISOString()}</p></div></body>\n</html>`;
+
+        // Use Vercel v13 deployments API with file uploads
+        const deployRes = await fetch('https://api.vercel.com/v13/deployments', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${vercelToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            name: projectName,
+            target: 'production',
+            files: [
+              {
+                file: 'index.html',
+                data: indexHtml,
+                encoding: 'utf-8'
+              }
+            ],
+            projectSettings: {
+              framework: null,
+              buildCommand: null,
+              outputDirectory: null
+            }
+          })
+        });
+
+        const deployData = await deployRes.json();
+
+        if (deployRes.ok || deployRes.status === 201) {
+          const deployUrl = deployData.url ? `https://${deployData.url}` : `https://${projectName}.vercel.app`;
+          const deployId = deployData.id || deployData.uid || 'N/A';
+          const deployState = deployData.readyState || deployData.status || 'BUILDING';
+          actionsTaken.push(
+            `✅ [AÇÃO REAL EXECUTADA NA VERCEL API v13]: Deploy iniciado com sucesso!\n` +
+            `- ID do Deploy: \`${deployId}\`\n` +
+            `- URL: ${deployUrl}\n` +
+            `- Estado atual: **${deployState}** (pode levar 10-30s para ativar)\n` +
+            `- Projeto: ${projectName}\n` +
+            `⚠️ Aguarde a propagação CDN antes de acessar. O status final pode ser verificado em: https://vercel.com/dashboard`
+          );
+        } else {
+          const errMsg = deployData.error?.message || deployData.message || JSON.stringify(deployData).substring(0, 300);
+          actionsTaken.push(`⚠️ [FALHA NA AÇÃO VERCEL DEPLOY]: HTTP ${deployRes.status} — ${errMsg}`);
+        }
+      }
+    } catch (vercelErr) {
+      actionsTaken.push(`⚠️ [FALHA NA AÇÃO VERCEL DEPLOY]: ${vercelErr.message}`);
+    }
+  }
+
   return actionsTaken.join('\n\n');
 }
 
@@ -1679,7 +1806,9 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
 ### INSTRUÇÕES OBRIGATÓRIAS PARA A HERMES CENTRAL JULIANA:
 - Autonomia e ferramentas (Tools) estão 100% habilitadas e ativas via Nous Portal API.
 - Quando a administradora solicitar ações (como "crie a tarefa X no ClickUp", "limpe o vault", "atualize o orçamento Meta Ads"), invoque diretamente a ferramenta (Tool) apropriada.
-- NUNCA alucine ou invente dados fictícios. Responda estritamente com base nos dados reais do ecossistema.
+- **REGRA ANTI-ALUCINAÇÃO ABSOLUTA**: NUNCA declare que uma ação foi executada, um deploy foi feito, uma API foi chamada, ou qualquer resultado foi obtido SEM que o motor de autonomia tenha confirmado a execução com dados reais. Se a seção [AÇÕES REAIS EXECUTADAS] acima estiver vazia ou não contiver a ação solicitada, isso significa que a ação NÃO foi executada — informe isso honestamente ao usuário e oriente sobre o que é necessário para executá-la.
+- **REGRA DE HONESTIDADE SOBRE CAPACIDADES**: Se o usuário solicitar uma ação que não está no escopo atual do motor de autonomia (ex: criar repositório GitHub + fazer deploy completo no Vercel em cadeia), informe claramente quais etapas foram executadas pelo motor real e quais ainda não têm suporte automatizado, ao invés de simular uma execução fictícia.
+- NUNCA invente SHAs de commit, IDs de deploy, URLs de produção, respostas de curl ou qualquer dado de API que não tenha sido confirmado pela seção de ações reais acima.
 - Entregue respostas executivas objetivas, humanas e diretas para a Juliana.`;
 
   const modeInstruction = MODES && MODES[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${MODES[mode]}` : '';
