@@ -1245,75 +1245,74 @@ async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
   return msgObj.content || '';
 }
 
+// NOUS PORTAL FREE MODELS — ordem de prioridade, nunca usar OpenRouter como primary
+const NOUS_FREE_MODELS = [
+  'stepfun/step-3.7-flash:free',
+  'inclusionai/ling-3.0-flash:free',
+  'poolside/laguna-s-2.1:free',
+  'poolside/laguna-xs-2.1:free'
+];
+
 async function callLLMWithTools(modelName, messages, maxTokens, tools) {
   const { nousKey, openrouterKey } = await getLLMCredentials();
-  
-  const isNousModel = modelName.endsWith(':free') || modelName.includes('stepfun') || modelName.includes('inclusionai') || modelName.includes('poolside') || modelName.includes('tencent') || modelName.includes('nousresearch');
 
-  let endpoint = (isNousModel || nousKey) ? NOUS_PORTAL_ENDPOINT : OPENROUTER_ENDPOINT;
-  let apiKey = (isNousModel || nousKey) ? nousKey : openrouterKey;
+  // SEMPRE usar Nous Portal como primary — OpenRouter é último recurso
+  const modelsToAttempt = [modelName, ...NOUS_FREE_MODELS.filter(m => m !== modelName)];
 
-  const payload = {
-    model: modelName,
-    max_tokens: maxTokens || 1200,
-    messages,
-    ...(tools && tools.length ? { tools, tool_choice: 'auto' } : {})
-  };
-
-  try {
-    const response = await fetch(endpoint, {
+  const tryNous = async (model, withTools) => {
+    const payload = {
+      model,
+      max_tokens: maxTokens || 1200,
+      messages,
+      ...(withTools && tools && tools.length ? { tools, tool_choice: 'auto' } : {})
+    };
+    const response = await fetch(NOUS_PORTAL_ENDPOINT, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${apiKey}`,
+        'Authorization': `Bearer ${nousKey}`,
         'Content-Type': 'application/json',
         'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
         'X-Title': 'Hermes Central Juliana (Nous Portal Primary)'
       },
       body: JSON.stringify(payload)
     });
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Nous HTTP ${response.status}: ${errText.substring(0, 120)}`);
+    }
+    const data = await response.json();
+    const msg = data.choices?.[0]?.message;
+    if (!msg) throw new Error(`Modelo ${model} retornou choices vazio.`);
+    const hasContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
+    const hasTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+    if (!hasContent && !hasTools) throw new Error(`Modelo ${model} retornou conteúdo vazio.`);
+    return msg;
+  };
 
-    if (response.ok) {
-      const data = await response.json();
-      const msg = data.choices?.[0]?.message;
-      if (msg) {
-        const hasContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
-        const hasTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
-        if (hasContent || hasTools) return msg;
-
-        // If content is empty/null and no tool calls triggered, retry payload without tools array
-        if (tools && tools.length) {
-          console.warn(`[LLM CALL WARN] Model ${modelName} returned empty content with tools enabled. Retrying without tools...`);
-          const noToolsPayload = { model: modelName, max_tokens: maxTokens || 1200, messages };
-          const retryRes = await fetch(endpoint, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
-              'X-Title': 'Hermes Central Juliana Retry'
-            },
-            body: JSON.stringify(noToolsPayload)
-          });
-          if (retryRes.ok) {
-            const retryData = await retryRes.json();
-            const retryMsg = retryData.choices?.[0]?.message;
-            if (retryMsg && typeof retryMsg.content === 'string' && retryMsg.content.trim().length > 0) {
-              return retryMsg;
-            }
-          }
+  // 1. Tentar cada modelo Nous Portal em sequência (com tools, depois sem tools se necessário)
+  for (const model of modelsToAttempt) {
+    try {
+      console.log(`[LLM NOUS] Trying model: ${model}`);
+      const msg = await tryNous(model, true);
+      return msg;
+    } catch (err) {
+      console.warn(`[LLM NOUS WARN] ${model} falhou: ${err.message}`);
+      // Se falhou com tools, tenta sem tools no mesmo modelo
+      if (tools && tools.length) {
+        try {
+          const msgNoTools = await tryNous(model, false);
+          return msgNoTools;
+        } catch (e2) {
+          console.warn(`[LLM NOUS WARN] ${model} sem tools também falhou: ${e2.message}`);
         }
       }
-    } else {
-      const errText = await response.text();
-      console.warn(`[LLM CALL WARN] Primary endpoint (${endpoint}) returned ${response.status}: ${errText.substring(0, 150)}`);
     }
-  } catch (err) {
-    console.warn(`[LLM CALL WARN] Primary endpoint (${endpoint}) failed: ${err.message}`);
   }
 
-  // Fallback to OpenRouter if primary Nous call fails and OpenRouter key exists
-  if (openrouterKey && endpoint !== OPENROUTER_ENDPOINT) {
+  // 2. ÚLTIMO RECURSO: OpenRouter (apenas se todos os modelos Nous falharem)
+  if (openrouterKey) {
     try {
+      console.warn('[LLM FALLBACK] Tous os modelos Nous Portal falharam. Tentando OpenRouter como último recurso...');
       const fbPayload = {
         model: 'openai/gpt-4o-mini',
         max_tokens: maxTokens || 1200,
@@ -1326,7 +1325,7 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
           'Authorization': `Bearer ${openrouterKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
-          'X-Title': 'Hermes Central Juliana Fallback'
+          'X-Title': 'Hermes Central Juliana LAST RESORT OpenRouter'
         },
         body: JSON.stringify(fbPayload)
       });
