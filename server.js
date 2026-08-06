@@ -1217,20 +1217,20 @@ function selectOptimalModel(promptText, mode) {
 
   if (isHeavy) {
     return {
-      primary: 'openai/gpt-4o-mini',
-      fallbacks: ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free', 'stepfun/step-3.7-flash:free'],
+      primary: 'stepfun/step-3.7-flash:free',
+      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
       complexity: 'HEAVY'
     };
   } else if (isLight) {
     return {
       primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['openai/gpt-4o-mini', 'google/gemini-2.0-flash-exp:free'],
+      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free'],
       complexity: 'LIGHT'
     };
   } else {
     return {
-      primary: 'openai/gpt-4o-mini',
-      fallbacks: ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free', 'stepfun/step-3.7-flash:free'],
+      primary: 'stepfun/step-3.7-flash:free',
+      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
       complexity: 'MEDIUM'
     };
   }
