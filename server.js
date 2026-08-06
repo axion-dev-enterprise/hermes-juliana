@@ -1439,9 +1439,9 @@ async function executeExecutiveActionMandate(message) {
     }
   }
 
-  // 2. SAVE / UPDATE VAULT KEY (e.g. "salve a chave telegram 123456:ABC")
+  // 2. SAVE / UPDATE VAULT KEY (e.g. "salve a chave github ghp_ABC", "salve a chave telegram 123456:ABC")
   if (msgLower.includes('salve') || msgLower.includes('salvar') || msgLower.includes('adicionar token')) {
-    const tokenMatch = message.match(/(telegram|asaas|clickup|whatsapp|openrouter)\s+(?:token|chave|api)?\s*[:=]?\s*([^\s]+)/i);
+    const tokenMatch = message.match(/(telegram|asaas|clickup|whatsapp|openrouter|github|meta|openai|anthropic|gemini)\s+(?:token|chave|api)?\s*[:=]?\s*([^\s]+)/i);
     if (tokenMatch) {
       const serviceName = tokenMatch[1].toLowerCase();
       const tokenValue = tokenMatch[2];
