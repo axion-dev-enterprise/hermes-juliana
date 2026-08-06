@@ -1209,7 +1209,7 @@ function selectOptimalModel(promptText, mode) {
   const cleanText = rawText.replace(/[^\w\s]/gi, '').trim();
   const len = rawText.length;
 
-  const heavyKeywords = ['código', 'script', 'arquitetura', 'auditoria', 'financeiro', 'contrato', 'análise profunda', 'comparativo', 'segurança', 'refatorar', 'relatório completo', 'complexo', 'algoritmo', 'banco de dados'];
+  const heavyKeywords = ['código', 'script', 'arquitetura', 'auditoria', 'financeiro', 'contrato', 'análise profunda', 'comparativo', 'segurança', 'refatorar', 'relatório completo', 'complexo', 'algoritmo', 'banco de dados', 'issue', 'github', 'clickup', 'asaas', 'autonomia', 'ferramenta', 'criar'];
   const isHeavy = heavyKeywords.some(k => rawText.includes(k)) || len > 220 || mode === 'CRISIS';
 
   const lightKeywords = ['olá', 'oi', 'bom dia', 'boa tarde', 'boa noite', 'ajuda', 'quem é você', 'teste', 'ping', 'status rápido'];
@@ -1217,20 +1217,20 @@ function selectOptimalModel(promptText, mode) {
 
   if (isHeavy) {
     return {
-      primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'poolside/laguna-xs-2.1:free', 'openai/gpt-4o-mini'],
+      primary: 'openai/gpt-4o-mini',
+      fallbacks: ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free', 'stepfun/step-3.7-flash:free'],
       complexity: 'HEAVY'
     };
   } else if (isLight) {
     return {
       primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
+      fallbacks: ['openai/gpt-4o-mini', 'google/gemini-2.0-flash-exp:free'],
       complexity: 'LIGHT'
     };
   } else {
     return {
-      primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
+      primary: 'openai/gpt-4o-mini',
+      fallbacks: ['google/gemini-2.0-flash-exp:free', 'meta-llama/llama-3.3-70b-instruct:free', 'stepfun/step-3.7-flash:free'],
       complexity: 'MEDIUM'
     };
   }
@@ -1501,6 +1501,46 @@ async function executeExecutiveActionMandate(message) {
       }
     } catch (clickupErr) {
       console.error('[ACTION ENGINE CLICKUP ERROR]:', clickupErr.message);
+    }
+  }
+
+  // 4. CREATE GITHUB ISSUE MANDATE (e.g. "crie a issue X no github", "crie issues no github")
+  if ((msgLower.includes('crie') || msgLower.includes('criar') || msgLower.includes('gerar')) && (msgLower.includes('issue') || msgLower.includes('issues')) && (msgLower.includes('github') || msgLower.includes('git'))) {
+    try {
+      const keys = await getRealVaultKeys();
+      const githubKeyObj = keys.find(k => k.service.toLowerCase().includes('github'));
+      const token = githubKeyObj?.rawToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
+      const repo = process.env.GITHUB_REPOSITORY || 'axion-dev-enterprise/hermes-juliana';
+      
+      const issueTitleMatch = message.match(/(?:issue|tarefa|bug)\s+["']?([^"'\n]+)["']?/i);
+      const title = issueTitleMatch ? issueTitleMatch[1] : `[AUTONOMIA] Solicitação Executiva da Juliana: ${message.substring(0, 80)}`;
+      
+      if (!token) {
+        actionsTaken.push(`⚠️ [AUTONOMIA GITHUB]: A chave de API do GitHub não foi encontrada no Vault ou em GITHUB_TOKEN. Para que a Juliana crie a issue no repositório **${repo}**, configure o token do GitHub no Vault.`);
+      } else {
+        const ghRes = await fetch(`https://api.github.com/repos/${repo}/issues`, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/vnd.github+json',
+            'Authorization': `Bearer ${token}`,
+            'X-GitHub-Api-Version': '2022-11-28',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title,
+            body: `Issue criada automaticamente pelo motor de Autonomia do Hermes Central Juliana.\n\n**Comando do Usuário**: ${message}`
+          })
+        });
+        if (ghRes.ok) {
+          const createdIssue = await ghRes.json();
+          actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO GITHUB REST API]: Issue #${createdIssue.number} ("${createdIssue.title}") criada com sucesso no repositório **${repo}**! URL: ${createdIssue.html_url}`);
+        } else {
+          const errText = await ghRes.text();
+          actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB]: GitHub HTTP ${ghRes.status}: ${errText.substring(0, 150)}`);
+        }
+      }
+    } catch (ghErr) {
+      actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB]: ${ghErr.message}`);
     }
   }
 
