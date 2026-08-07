@@ -1497,18 +1497,6 @@ app.post('/api/v1/agent/chat', async (req, res) => {
     attachments.forEach(att => {
       if (att.content || att.textContent) {
         attachmentContext += `\n[ARQUIVO ANEXADO: ${att.name || 'documento'}]\n${att.content || att.textContent}\n`;
-      }
-    });
-  }
-
-  const fullPromptMessage = attachmentContext ? `${message}\n${attachmentContext}` : message;
-
-  const routing = selectOptimalModel(fullPromptMessage, mode);
-  console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary} (Nous Portal)`);
-
-  // 1. Execute Real Actions if commanded by Juliana
-  const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
-
   const cleanSessionId = String(sessionId || 'session-default').trim();
 
   // Process attachments (images for vision, documents for text context)
