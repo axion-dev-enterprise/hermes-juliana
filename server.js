@@ -1037,42 +1037,41 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
         { role: 'user', content: message }
       ];
 
-      // Call LLM with full history context
+      // Call LLM with full history context AND dynamic tools!
       const keys = await getRealVaultKeys();
-      const openrouterKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
-      const apiKey = process.env.OPENROUTER_API_KEY || openrouterKey;
+      let messages = [
+        { role: 'system', content: fullSystemPrompt },
+        ...history.slice(-WA_HISTORY_LIMIT * 2),
+        { role: 'user', content: message }
+      ];
 
-      let reply = null;
-      const modelsToTry = [routing.primary, ...routing.fallbacks];
-      for (const model of modelsToTry) {
-        try {
-          const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${apiKey}`,
-              'Content-Type': 'application/json',
-              'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
-              'X-Title': 'Hermes Central Juliana WhatsApp'
-            },
-            body: JSON.stringify({
-              model,
-              max_tokens: routing.complexity === 'HEAVY' ? 2000 : 1200,
-              messages: llmMessages
-            })
-          });
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          const data = await response.json();
-          reply = data.choices?.[0]?.message?.content;
-          if (reply) {
-            console.log(`[WHATSAPP WEBHOOK] LLM replied via ${model}: ${reply.substring(0, 80)}...`);
-            break;
+      let msgObj = await callLLMWithTools(routing.primary, messages, 1200, TOOL_DEFINITIONS);
+      const executedToolLogs = [];
+
+      // Multi-turn tool execution loop for WhatsApp (Hermes Agent Architecture)
+      for (let turn = 0; turn < 5 && Array.isArray(msgObj?.tool_calls) && msgObj.tool_calls.length; turn += 1) {
+        messages.push(msgObj);
+        for (const toolCall of msgObj.tool_calls) {
+          let toolResult;
+          try {
+            console.log(`[WHATSAPP AUTONOMY TOOL] Executing: ${toolCall.function.name} with args:`, toolCall.function.arguments);
+            toolResult = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), keys);
+            executedToolLogs.push(`✅ [${toolCall.function.name}]: ${JSON.stringify(toolResult)}`);
+          } catch (tErr) {
+            console.warn(`[WHATSAPP TOOL ERR] ${toolCall.function.name} failed:`, tErr.message);
+            toolResult = { error: tErr.message };
+            executedToolLogs.push(`⚠️ [${toolCall.function.name}]: ${tErr.message}`);
           }
-        } catch (modelErr) {
-          console.warn(`[WHATSAPP WEBHOOK] Model ${model} failed:`, modelErr.message);
+          messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(toolResult) });
         }
+        msgObj = await callLLMWithTools(routing.primary, messages, 1200, TOOL_DEFINITIONS);
       }
 
-      if (!reply) throw new Error('All LLM models failed');
+      let reply = msgObj?.content;
+      if (!reply && executedToolLogs.length > 0) {
+        reply = `*Ações Executadas no Ecossistema:*\n\n${executedToolLogs.join('\n\n')}`;
+      }
+      if (!reply) throw new Error('Todas as tentativas do modelo retornaram resposta vazia.');
 
       // Save assistant reply to history
       appendWhatsAppHistory(sender, 'assistant', reply);
@@ -1080,9 +1079,9 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
       return res.json({ reply });
     } catch (err) {
       console.error('[WHATSAPP AGENT REPLY ERR]:', err.message);
-      return res.json({ reply: 'Olá! Sou a Juliana da W Soluções. No momento estou com instabilidade técnica. Por favor, tente novamente em instantes.' });
+      return res.json({ reply: `Olá! Houve uma indisponibilidade na execução: ${err.message}` });
     }
-  }
+  }`
 
   res.json({ status: 'OK' });
 });
@@ -1372,312 +1371,44 @@ async function buildFullSystemPrompt(mode, extraContext) {
   return `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
 }
 
-// EXECUTIVE ACTION EXECUTION ENGINE (JULIANA ACTION MANDATES)
+// EXECUTIVE ACTION EXECUTION ENGINE (ATOMIC DATABASE & VAULT MANDATES)
 async function executeExecutiveActionMandate(message) {
   const msgLower = (message || '').toLowerCase();
   const actionsTaken = [];
 
-  // 1. CLEAR ALL SESSIONS / HISTORY MANDATE (e.g. "limpe todas as sessões", "limpar histórico", "apagar conversas")
-  if (msgLower.includes('sess') || msgLower.includes('histórico') || msgLower.includes('historico') || msgLower.includes('conversa')) {
-    if (msgLower.includes('limp') || msgLower.includes('apag') || msgLower.includes('delet') || msgLower.includes('remov')) {
-      try {
-        await pool.query('TRUNCATE TABLE chat_messages, chat_sessions RESTART IDENTITY CASCADE');
-        actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO POSTGRESQL DB]: Todas as sessões de teste e histórico de mensagens foram limpos e zerados no banco de dados PostgreSQL com sucesso.');
-      } catch (err) {
-      }
-    }
+  // CLEAR ALL SESSIONS MANDATE
+  if ((msgLower.includes('sess') || msgLower.includes('histórico') || msgLower.includes('historico')) && (msgLower.includes('limp') || msgLower.includes('apag') || msgLower.includes('delet'))) {
+    try {
+      await pool.query('TRUNCATE TABLE chat_messages, chat_sessions RESTART IDENTITY CASCADE');
+      actionsTaken.push('✅ [POSTGRESQL DB]: Todas as sessões e histórico de mensagens foram zerados no banco de dados.');
+    } catch (err) {}
   }
 
-  // WHATSAPP SESSIONS MANDATES (e.g. "deslogar whatsapp", "zerar whatsapp", "reconectar whatsapp")
-  if (msgLower.includes('whatsapp')) {
-    if (msgLower.includes('deslogar') || msgLower.includes('zerar') || msgLower.includes('desconectar') || msgLower.includes('sair')) {
-      connectorsStatusStore.whatsapp.connected = false;
-      connectorsStatusStore.whatsapp.phone = null;
-      try {
-        await pool.query(`UPDATE api_vault SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW() WHERE LOWER(service_name) LIKE '%whatsapp%'`);
-      } catch (err) {}
-      actionsTaken.push('✅ [AÇÃO REAL EXECUTADA NO ENGINE WHATSAPP]: Sessão do WhatsApp deslogada, tokens zerados no PostgreSQL e status redefinido para DESCONECTADO com sucesso.');
-    } else if (msgLower.includes('reconectar') || msgLower.includes('restabelecer') || msgLower.includes('conectar')) {
-      try {
-        await fetch(`${WHATSAPP_KEEPER_URL}/qrcode`, { method: 'POST' });
-        const waStatus = await getRealWhatsAppStatus();
-        connectorsStatusStore.whatsapp.connected = waStatus.connected;
-        connectorsStatusStore.whatsapp.phone = waStatus.phone;
-        actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO BAILEYS KEEPER]: Solicitação de reconexão enviada ao motor WhatsApp real. Status atual: ${waStatus.status || (waStatus.connected ? 'CONNECTED' : 'SCAN_REQUIRED')}.`);
-      } catch (err) {
-        actionsTaken.push(`⚠️ [KEEPER WHATSAPP WARN]: Não foi possível contatar o motor Baileys: ${err.message}`);
-      }
-    }
-  }
-
-  // 1. CLEAR / REMOVE VAULT KEYS (e.g. "limpe telegram e asaas", "remova chave telegram", "apagar asaas")
-  if (msgLower.includes('limpe') || msgLower.includes('limpar') || msgLower.includes('remova') || msgLower.includes('remover') || msgLower.includes('apague') || msgLower.includes('deletar')) {
+  // CLEAR / SAVE VAULT KEYS
+  if (msgLower.includes('limpe') || msgLower.includes('remova') || msgLower.includes('apague')) {
     const servicesToClean = [];
     if (msgLower.includes('telegram')) servicesToClean.push('telegram');
     if (msgLower.includes('asaas')) servicesToClean.push('asaas');
     if (msgLower.includes('whatsapp')) servicesToClean.push('whatsapp');
     if (msgLower.includes('clickup')) servicesToClean.push('clickup');
     if (msgLower.includes('meta')) servicesToClean.push('meta');
-    if (msgLower.includes('vault') && (msgLower.includes('todos') || msgLower.includes('mock') || servicesToClean.length === 0)) {
-      servicesToClean.push('telegram', 'asaas');
-    }
-
     if (servicesToClean.length > 0) {
       try {
-        await pool.query(`
-          UPDATE api_vault
-          SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW()
-          WHERE LOWER(service_name) = ANY($1::text[])
-        `, [servicesToClean]);
-
-        actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO POSTGRESQL DB]: As chaves de API dos serviços **${servicesToClean.join(', ').toUpperCase()}** foram limpas e redefinidas para 'unconfigured' na tabela \`api_vault\`.`);
-      } catch (err) {
-        console.error('[ACTION ENGINE VAULT CLEAN ERROR]:', err.message);
-        actionsTaken.push(`⚠️ [FALHA NA AÇÃO DO VAULT]: Erro ao limpar chaves no PostgreSQL: ${err.message}`);
-      }
+        await pool.query(`UPDATE api_vault SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW() WHERE LOWER(service_name) = ANY($1::text[])`, [servicesToClean]);
+        actionsTaken.push(`✅ [POSTGRESQL DB]: Chaves dos serviços ${servicesToClean.join(', ').toUpperCase()} limpas no Vault.`);
+      } catch (err) {}
     }
   }
 
-  // 2. SAVE / UPDATE VAULT KEY (e.g. "salve a chave github ghp_ABC", "salve a chave telegram 123456:ABC")
-  if (msgLower.includes('salve') || msgLower.includes('salvar') || msgLower.includes('adicionar token')) {
+  if (msgLower.includes('salve') || msgLower.includes('salvar')) {
     const tokenMatch = message.match(/(telegram|asaas|clickup|whatsapp|openrouter|github|vercel|meta|openai|anthropic|gemini)\s+(?:token|chave|api)?\s*[:=]?\s*([^\s]+)/i);
     if (tokenMatch) {
       const serviceName = tokenMatch[1].toLowerCase();
       const tokenValue = tokenMatch[2];
       try {
-        await pool.query(`
-          INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
-          VALUES ($1, $2, $2, 'configured', NOW())
-          ON CONFLICT (service_name) DO UPDATE SET api_key = $2, api_token = $2, status = 'configured', updated_at = NOW()
-        `, [serviceName, tokenValue]);
-        actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO POSTGRESQL DB]: A chave de API do serviço **${serviceName.toUpperCase()}** foi salva com sucesso na tabela \`api_vault\`.`);
-      } catch (err) {
-        console.error('[ACTION ENGINE VAULT SAVE ERROR]:', err.message);
-      }
-    }
-  }
-
-  // 3. CREATE CLICKUP TASK (e.g. "crie a tarefa Otimização SEO no ClickUp")
-  if ((msgLower.includes('crie') || msgLower.includes('criar')) && msgLower.includes('tarefa') && msgLower.includes('clickup')) {
-    try {
-      const taskNameMatch = message.match(/(?:tarefa|task)\s+["']?([^"'\n]+)["']?/i);
-      const taskName = taskNameMatch ? taskNameMatch[1] : (message.replace(/crie|criar|tarefa|clickup/gi, '').trim() || 'Auditoria de Performance');
-      
-      const keys = await getRealVaultKeys();
-      const clickupKeyObj = keys.find(k => k.service.toLowerCase().includes('clickup'));
-      const apiKey = clickupKeyObj ? clickupKeyObj.rawToken : process.env.CLICKUP_API_KEY;
-      const teamId = process.env.CLICKUP_TEAM_ID || '90133016156';
-
-      if (!apiKey) {
-        actionsTaken.push('⚠️ [AUTONOMIA CLICKUP]: A chave de API do ClickUp não foi encontrada no Vault.');
-      } else {
-        const teamsRes = await fetch(`https://api.clickup.com/api/v2/team/${teamId}/space`, {
-          headers: { 'Authorization': apiKey }
-        });
-        if (teamsRes.ok) {
-          const spaceData = await teamsRes.json();
-          const firstSpace = spaceData.spaces && spaceData.spaces[0];
-          if (firstSpace) {
-            const folderRes = await fetch(`https://api.clickup.com/api/v2/space/${firstSpace.id}/list`, {
-              headers: { 'Authorization': apiKey }
-            });
-            if (folderRes.ok) {
-              const listData = await folderRes.json();
-              const firstList = listData.lists && listData.lists[0];
-              if (firstList) {
-                const createTaskRes = await fetch(`https://api.clickup.com/api/v2/list/${firstList.id}/task`, {
-                  method: 'POST',
-                  headers: {
-                    'Authorization': apiKey,
-                    'Content-Type': 'application/json'
-                  },
-                  body: JSON.stringify({
-                    name: taskName,
-                    description: 'Tarefa criada automaticamente via comando executivo da Juliana no Hermes Central.'
-                  })
-                });
-                if (createTaskRes.ok) {
-                  const createdTask = await createTaskRes.json();
-                  actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO CLICKUP API v2]: Tarefa **"${createdTask.name}"** (ID: ${createdTask.id}) criada com sucesso no ClickUp! URL: ${createdTask.url}`);
-                } else {
-                  const errText = await createTaskRes.text();
-                  actionsTaken.push(`⚠️ [FALHA NA AÇÃO CLICKUP]: ClickUp HTTP ${createTaskRes.status}: ${errText.substring(0, 150)}`);
-                }
-              }
-            }
-          }
-        }
-      }
-    } catch (clickupErr) {
-      console.error('[ACTION ENGINE CLICKUP ERROR]:', clickupErr.message);
-      actionsTaken.push(`⚠️ [FALHA NA AÇÃO CLICKUP]: ${clickupErr.message}`);
-    }
-  }
-
-  // 4. CREATE GITHUB ISSUE MANDATE (e.g. "crie a issue X no github", "crie issues no github")
-  if ((msgLower.includes('crie') || msgLower.includes('criar') || msgLower.includes('gerar')) && (msgLower.includes('issue') || msgLower.includes('issues')) && (msgLower.includes('github') || msgLower.includes('git'))) {
-    try {
-      const keys = await getRealVaultKeys();
-      const githubKeyObj = keys.find(k => k.service.toLowerCase().includes('github'));
-      const token = githubKeyObj?.rawToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-      const repo = process.env.GITHUB_REPOSITORY || 'axion-dev-enterprise/hermes-juliana';
-      
-      const issueTitleMatch = message.match(/(?:issue|tarefa|bug)\s+["']?([^"'\n]+)["']?/i);
-      const title = issueTitleMatch ? issueTitleMatch[1] : `[AUTONOMIA] Solicitação Executiva da Juliana: ${message.substring(0, 80)}`;
-      
-      if (!token) {
-        actionsTaken.push(`⚠️ [AUTONOMIA GITHUB]: A chave de API do GitHub não foi encontrada no Vault ou em GITHUB_TOKEN. Para que a Juliana crie a issue no repositório **${repo}**, configure o token do GitHub no Vault.`);
-      } else {
-        const ghRes = await fetch(`https://api.github.com/repos/${repo}/issues`, {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/vnd.github+json',
-            'Authorization': `Bearer ${token}`,
-            'X-GitHub-Api-Version': '2022-11-28',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            title,
-            body: `Issue criada automaticamente pelo motor de Autonomia do Hermes Central Juliana.\n\n**Comando do Usuário**: ${message}`
-          })
-        });
-        if (ghRes.ok) {
-          const createdIssue = await ghRes.json();
-          actionsTaken.push(`✅ [AÇÃO REAL EXECUTADA NO GITHUB REST API]: Issue #${createdIssue.number} ("${createdIssue.title}") criada com sucesso no repositório **${repo}**! URL: ${createdIssue.html_url}`);
-        } else {
-          const errText = await ghRes.text();
-          actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB]: GitHub HTTP ${ghRes.status}: ${errText.substring(0, 150)}`);
-        }
-      }
-    } catch (ghErr) {
-      actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB]: ${ghErr.message}`);
-    }
-  }
-
-  // 5. CREATE GITHUB REPOSITORY (e.g. "crie repositório", "crie repo github", "criar repositório no github")
-  if (
-    (msgLower.includes('crie') || msgLower.includes('criar') || msgLower.includes('cria')) &&
-    (msgLower.includes('repositório') || msgLower.includes('repositorio') || msgLower.includes('repo')) &&
-    (msgLower.includes('github') || msgLower.includes('git'))
-  ) {
-    try {
-      const keys = await getRealVaultKeys();
-      const githubKeyObj = keys.find(k => k.service.toLowerCase().includes('github'));
-      const token = githubKeyObj?.rawToken || process.env.GITHUB_TOKEN || process.env.GH_TOKEN;
-
-      if (!token) {
-        actionsTaken.push('⚠️ [AUTONOMIA GITHUB]: Token do GitHub não encontrado no Vault. Configure em: salve a chave github <token>');
-      } else {
-        // Extract repo name from message
-        const repoNameMatch = message.match(/(?:reposit[oó]rio|repo)\s+["']?([\w\-\.]+)["']?/i);
-        const repoName = repoNameMatch ? repoNameMatch[1].toLowerCase().replace(/\s+/g, '-') : 'repositorio-hermes-juliana';
-        const isPrivate = !msgLower.includes('público') && !msgLower.includes('publico');
-
-        const ghRes = await fetch('https://api.github.com/user/repos', {
-          method: 'POST',
-          headers: {
-            'Accept': 'application/vnd.github+json',
-            'Authorization': `Bearer ${token}`,
-            'X-GitHub-Api-Version': '2022-11-28',
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            name: repoName,
-            description: 'Repositório criado automaticamente pelo motor de Autonomia Hermes Central Juliana.',
-            private: isPrivate,
-            auto_init: true
-          })
-        });
-
-        if (ghRes.ok) {
-          const repo = await ghRes.json();
-          actionsTaken.push(
-            `✅ [AÇÃO REAL EXECUTADA NO GITHUB REST API]: Repositório **${repo.full_name}** criado com sucesso!\n` +
-            `- URL: ${repo.html_url}\n` +
-            `- Visibilidade: ${repo.private ? 'Privado 🔒' : 'Público 🌐'}\n` +
-            `- Clone SSH: \`${repo.ssh_url}\`\n` +
-            `- Clone HTTPS: \`${repo.clone_url}\``
-          );
-        } else {
-          const errBody = await ghRes.json().catch(() => ({ message: 'Erro desconhecido' }));
-          if (ghRes.status === 422 && errBody.errors?.some(e => e.message?.includes('already exists'))) {
-            actionsTaken.push(`⚠️ [GITHUB API]: O repositório "${repoName}" já existe nesta conta. Utilize outro nome ou acesse-o diretamente.`);
-          } else {
-            actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB CREATE REPO]: HTTP ${ghRes.status} — ${errBody.message || JSON.stringify(errBody).substring(0, 200)}`);
-          }
-        }
-      }
-    } catch (ghRepoErr) {
-      actionsTaken.push(`⚠️ [FALHA NA AÇÃO GITHUB CREATE REPO]: ${ghRepoErr.message}`);
-    }
-  }
-
-  // 6. VERCEL DEPLOY (e.g. "deploy no vercel", "fazer deploy", "publique no vercel")
-  if (
-    (msgLower.includes('deploy') || msgLower.includes('publicar') || msgLower.includes('publique') || msgLower.includes('hospedar')) &&
-    (msgLower.includes('vercel') || msgLower.includes('landing') || msgLower.includes('site'))
-  ) {
-    try {
-      const keys = await getRealVaultKeys();
-      const vercelKeyObj = keys.find(k => k.service.toLowerCase().includes('vercel'));
-      const vercelToken = vercelKeyObj?.rawToken || process.env.VERCEL_TOKEN;
-
-      if (!vercelToken) {
-        actionsTaken.push('⚠️ [AUTONOMIA VERCEL]: Token do Vercel não encontrado no Vault. Configure em: salve a chave vercel <token>');
-      } else {
-        // Extract project name from message
-        const projectNameMatch = message.match(/(?:projeto|project|landing|site|página)\s+["']?([\w\-\.]+)["']?/i);
-        const projectName = projectNameMatch ? projectNameMatch[1].toLowerCase().replace(/\s+/g, '-') : `hermes-deploy-${Date.now()}`;
-
-        // Create minimal HTML landing page files
-        const indexHtml = `<!DOCTYPE html>\n<html lang="pt-BR">\n<head>\n<meta charset="UTF-8"/>\n<meta name="viewport" content="width=device-width, initial-scale=1.0"/>\n<title>${projectName}</title>\n<style>body{font-family:system-ui,sans-serif;margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,#0f172a,#1e293b);color:#f8fafc}.card{background:#1e293b;border:1px solid #334155;border-radius:1rem;padding:3rem;text-align:center;max-width:600px}h1{font-size:2rem;color:#38bdf8;margin-bottom:.5rem}p{color:#94a3b8}</style>\n</head>\n<body><div class="card"><h1>${projectName}</h1><p>Deployed via Hermes Central Juliana — AXION Enterprise</p><p style="margin-top:1rem;font-size:.8rem;color:#64748b">${new Date().toISOString()}</p></div></body>\n</html>`;
-
-        // Use Vercel v13 deployments API with file uploads
-        const deployRes = await fetch('https://api.vercel.com/v13/deployments', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${vercelToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            name: projectName,
-            target: 'production',
-            files: [
-              {
-                file: 'index.html',
-                data: indexHtml,
-                encoding: 'utf-8'
-              }
-            ],
-            projectSettings: {
-              framework: null,
-              buildCommand: null,
-              outputDirectory: null
-            }
-          })
-        });
-
-        const deployData = await deployRes.json();
-
-        if (deployRes.ok || deployRes.status === 201) {
-          const deployUrl = deployData.url ? `https://${deployData.url}` : `https://${projectName}.vercel.app`;
-          const deployId = deployData.id || deployData.uid || 'N/A';
-          const deployState = deployData.readyState || deployData.status || 'BUILDING';
-          actionsTaken.push(
-            `✅ [AÇÃO REAL EXECUTADA NA VERCEL API v13]: Deploy iniciado com sucesso!\n` +
-            `- ID do Deploy: \`${deployId}\`\n` +
-            `- URL: ${deployUrl}\n` +
-            `- Estado atual: **${deployState}** (pode levar 10-30s para ativar)\n` +
-            `- Projeto: ${projectName}\n` +
-            `⚠️ Aguarde a propagação CDN antes de acessar. O status final pode ser verificado em: https://vercel.com/dashboard`
-          );
-        } else {
-          const errMsg = deployData.error?.message || deployData.message || JSON.stringify(deployData).substring(0, 300);
-          actionsTaken.push(`⚠️ [FALHA NA AÇÃO VERCEL DEPLOY]: HTTP ${deployRes.status} — ${errMsg}`);
-        }
-      }
-    } catch (vercelErr) {
-      actionsTaken.push(`⚠️ [FALHA NA AÇÃO VERCEL DEPLOY]: ${vercelErr.message}`);
+        await pool.query(`INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at) VALUES ($1, $2, $2, 'configured', NOW()) ON CONFLICT (service_name) DO UPDATE SET api_key = $2, api_token = $2, status = 'configured', updated_at = NOW()`, [serviceName, tokenValue]);
+        actionsTaken.push(`✅ [POSTGRESQL DB]: Chave do serviço **${serviceName.toUpperCase()}** salva no Vault.`);
+      } catch (err) {}
     }
   }
 
