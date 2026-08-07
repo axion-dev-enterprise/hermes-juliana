@@ -1491,12 +1491,6 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   let modelUsed = 'stepfun/step-3.7-flash:free';
   let isFallback = false;
 
-  // Process attachments (images for vision, documents for text context)
-  let attachmentContext = '';
-  if (Array.isArray(attachments) && attachments.length > 0) {
-    attachments.forEach(att => {
-      if (att.content || att.textContent) {
-        attachmentContext += `\n[ARQUIVO ANEXADO: ${att.name || 'documento'}]\n${att.content || att.textContent}\n`;
   const cleanSessionId = String(sessionId || 'session-default').trim();
 
   // Process attachments (images for vision, documents for text context)
