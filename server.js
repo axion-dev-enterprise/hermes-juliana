@@ -87,25 +87,48 @@ async function initDatabaseTables() {
         lead_id INT,
         created_at TIMESTAMP DEFAULT NOW()
       );
-      CREATE TABLE IF NOT EXISTS ai_inferences (
+      CREATE TABLE IF NOT EXISTS chat_sessions (
+        id VARCHAR(100) PRIMARY KEY,
+        user_id INT DEFAULT 1,
+        title VARCHAR(255) NOT NULL,
+        subagent_category VARCHAR(50) DEFAULT 'central',
+        folder VARCHAR(100) DEFAULT 'Geral',
+        is_archived BOOLEAN DEFAULT false,
+        created_at TIMESTAMP DEFAULT NOW(),
+        updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS chat_messages (
         id SERIAL PRIMARY KEY,
-        session_id VARCHAR(50),
-        model VARCHAR(100) NOT NULL,
-        prompt_tokens INT DEFAULT 0,
-        completion_tokens INT DEFAULT 0,
-        total_tokens INT DEFAULT 0,
-        cost_usd FLOAT DEFAULT 0.0,
-        latency_ms INT DEFAULT 0,
-        complexity VARCHAR(20) DEFAULT 'MEDIUM',
+        session_id VARCHAR(100) NOT NULL,
+        sender VARCHAR(50) NOT NULL,
+        content TEXT NOT NULL,
+        agent_name VARCHAR(100) DEFAULT 'Juliana',
+        model_used VARCHAR(100),
         created_at TIMESTAMP DEFAULT NOW()
       );
+      ALTER TABLE chat_sessions ALTER COLUMN id TYPE VARCHAR(100);
+      ALTER TABLE chat_messages ALTER COLUMN session_id TYPE VARCHAR(100);
     `);
-    console.log('[DB INIT] Database and CRM intelligence tables ready.');
+    console.log('[DB INIT] Database, Sessions and CRM intelligence tables ready.');
   } catch (err) {
     console.warn('[DB INIT WARN]:', err.message);
   }
 }
 initDatabaseTables();
+
+// GUARDRAIL INTERCEPTOR: Evita declarações falsas de sucesso se nenhuma Tool foi executada
+function sanitizeFalsePositiveClaims(replyText, executedToolLogs = []) {
+  if (!replyText || typeof replyText !== 'string') return replyText;
+  const affirmativeClaimRegex = /(?:criei|criad[oa]|deploy|publicad[oa]|alterad[oa]|deletad[oa]|cadastrad[oa])\s+(?:a|o|no|na|com sucesso|no github|no vercel|no clickup)/i;
+  const claimsSuccess = affirmativeClaimRegex.test(replyText);
+  const hasSuccessfulTool = Array.isArray(executedToolLogs) && executedToolLogs.some(log => typeof log === 'string' && log.startsWith('✅'));
+
+  if (claimsSuccess && !hasSuccessfulTool) {
+    console.warn('[GUARDRAIL ALERT] Intercepting false positive claim without successful tool execution!');
+    return `${replyText}\n\n⚠️ **Aviso de Integridade Operacional:** Nenhuma ação de API REST foi confirmada pelo ecossistema para esta solicitação. Caso o recurso exija credencial extra ou parâmetro técnico, configure-o no Vault.`;
+  }
+  return replyText;
+}
 
 // RATE LIMITER FOR AUTHENTICATION
 const loginAttemptsMap = new Map();
@@ -696,12 +719,13 @@ app.get('/api/v1/agent/sessions', async (req, res) => {
 app.post('/api/v1/agent/sessions', async (req, res) => {
   const { title, folder = 'Geral' } = req.body;
   const sessionTitle = title || `Atendimento ${new Date().toLocaleTimeString('pt-BR')}`;
+  const customId = `session-${Date.now()}`;
   try {
     const dbRes = await pool.query(`
-      INSERT INTO chat_sessions (user_id, title, subagent_category, created_at, updated_at, is_archived, folder)
-      VALUES (2, $1, 'central', NOW(), NOW(), false, $2)
-      RETURNING id::text, title, updated_at as "updatedAt", is_archived as "archived", folder
-    `, [sessionTitle, folder]);
+      INSERT INTO chat_sessions (id, user_id, title, subagent_category, created_at, updated_at, is_archived, folder)
+      VALUES ($1, 2, $2, 'central', NOW(), NOW(), false, $3)
+      RETURNING id, title, updated_at as "updatedAt", is_archived as "archived", folder
+    `, [customId, sessionTitle, folder]);
     
     const newSession = dbRes.rows[0];
     newSession.messageCount = 0;
@@ -709,7 +733,7 @@ app.post('/api/v1/agent/sessions', async (req, res) => {
     return res.status(201).json(newSession);
   } catch (err) {
     console.error('[DB SESSIONS POST ERROR]:', err.message);
-    const fallbackSession = { id: `session-${Date.now()}`, title: sessionTitle, updatedAt: new Date().toISOString(), messageCount: 0, archived: false };
+    const fallbackSession = { id: customId, title: sessionTitle, updatedAt: new Date().toISOString(), messageCount: 0, archived: false };
     sessionsStore.unshift(fallbackSession);
     res.status(201).json(fallbackSession);
   }
@@ -717,20 +741,20 @@ app.post('/api/v1/agent/sessions', async (req, res) => {
 
 app.get('/api/v1/agent/sessions/:id/messages', async (req, res) => {
   const { id } = req.params;
-  const numericId = parseInt(id, 10);
-  if (isNaN(numericId)) {
+  const cleanId = String(id || '').trim();
+  if (!cleanId) {
     return res.json({ status: 'success', data: [] });
   }
   try {
     const dbRes = await pool.query(`
-      SELECT id, session_id::text as "sessionId", sender, content, 
+      SELECT id, session_id as "sessionId", sender, content, 
              COALESCE(agent_name, 'Juliana') as "agentName", 
-             COALESCE(model_used, 'openai/gpt-4o-mini') as "modelUsed", 
+             COALESCE(model_used, 'stepfun/step-3.7-flash:free') as "modelUsed", 
              created_at as "createdAt"
       FROM chat_messages
       WHERE session_id = $1
       ORDER BY created_at ASC
-    `, [numericId]);
+    `, [cleanId]);
     res.json({ status: 'success', data: dbRes.rows });
   } catch (err) {
     console.error('[DB MESSAGES GET ERROR]:', err.message);
@@ -741,10 +765,10 @@ app.get('/api/v1/agent/sessions/:id/messages', async (req, res) => {
 app.put('/api/v1/agent/sessions/:id', async (req, res) => {
   const { id } = req.params;
   const { title } = req.body;
-  const numericId = parseInt(id, 10);
+  const cleanId = String(id || '').trim();
   try {
-    if (!isNaN(numericId)) {
-      await pool.query('UPDATE chat_sessions SET title = $1, updated_at = NOW() WHERE id = $2', [title, numericId]);
+    if (cleanId) {
+      await pool.query('UPDATE chat_sessions SET title = $1, updated_at = NOW() WHERE id = $2', [title, cleanId]);
     }
   } catch (err) {
     console.error('[DB SESSION RENAME ERROR]:', err.message);
@@ -756,10 +780,10 @@ app.put('/api/v1/agent/sessions/:id', async (req, res) => {
 
 app.put('/api/v1/agent/sessions/:id/archive', async (req, res) => {
   const { id } = req.params;
-  const numericId = parseInt(id, 10);
+  const cleanId = String(id || '').trim();
   try {
-    if (!isNaN(numericId)) {
-      await pool.query('UPDATE chat_sessions SET is_archived = NOT is_archived, updated_at = NOW() WHERE id = $1', [numericId]);
+    if (cleanId) {
+      await pool.query('UPDATE chat_sessions SET is_archived = NOT is_archived, updated_at = NOW() WHERE id = $1', [cleanId]);
     }
   } catch (err) {
     console.error('[DB SESSION ARCHIVE ERROR]:', err.message);
@@ -771,13 +795,19 @@ app.put('/api/v1/agent/sessions/:id/archive', async (req, res) => {
 
 app.delete('/api/v1/agent/sessions/:id', async (req, res) => {
   const { id } = req.params;
-  const numericId = parseInt(id, 10);
+  const cleanId = String(id || '').trim();
   try {
-    if (!isNaN(numericId)) {
-      await pool.query('DELETE FROM chat_messages WHERE session_id = $1', [numericId]);
-      await pool.query('DELETE FROM chat_sessions WHERE id = $1', [numericId]);
+    if (cleanId) {
+      await pool.query('DELETE FROM chat_messages WHERE session_id = $1', [cleanId]);
+      await pool.query('DELETE FROM chat_sessions WHERE id = $1', [cleanId]);
     }
   } catch (err) {
+    console.error('[DB SESSION DELETE ERROR]:', err.message);
+  }
+  const idx = sessionsStore.findIndex(s => s.id === id);
+  if (idx !== -1) sessionsStore.splice(idx, 1);
+  res.json({ status: 'success', message: 'Sessão excluída.' });
+});
     console.error('[DB SESSION DELETE ERROR]:', err.message);
   }
   sessionsStore = sessionsStore.filter(s => s.id !== id);
@@ -1010,10 +1040,38 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
       const crmIntelligence = await registerWhatsAppCrmIntelligence({ sender, pushName, message });
       if (crmIntelligence) console.log('[CRM WHATSAPP] Lead classified:', crmIntelligence.classification, crmIntelligence.stage);
       const routing = selectOptimalModel(message, 'EXECUTIVE');
+      const waSessionId = `whatsapp_${sender}`;
 
-      // Retrieve conversation history for context
-      const history = getWhatsAppHistory(sender);
-      appendWhatsAppHistory(sender, 'user', message);
+      // PERSISTENT POSTGRESQL CONVERSATION HISTORY FOR WHATSAPP
+      try {
+        await pool.query(`
+          INSERT INTO chat_sessions (id, title, folder, created_at, updated_at)
+          VALUES ($1, $2, 'WhatsApp', NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+        `, [waSessionId, `WhatsApp (${pushName || sender})`]);
+
+        await pool.query(`
+          INSERT INTO chat_messages (session_id, sender, content, agent_name, created_at)
+          VALUES ($1, 'user', $2, $3, NOW())
+        `, [waSessionId, message, pushName || 'Contato WhatsApp']);
+      } catch (dbErr) {
+        console.warn('[WA DB SAVE USER MSG WARN]:', dbErr.message);
+      }
+
+      // Fetch previous conversation turns from PostgreSQL (up to 30 turns)
+      let previousTurns = [];
+      try {
+        const msgRes = await pool.query(
+          'SELECT sender, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 30',
+          [waSessionId]
+        );
+        previousTurns = msgRes.rows.slice(0, -1).map(m => ({
+          role: (m.sender === 'user' || m.sender === 'Contato WhatsApp') ? 'user' : 'assistant',
+          content: m.content || ''
+        })).filter(m => m.content && m.content.trim().length > 0);
+      } catch (err) {
+        console.warn('[WA DB HISTORY FETCH WARN]:', err.message);
+      }
 
       const whatsappCtx = `
 
@@ -1029,19 +1087,12 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
 
       // Build system prompt with real context
       const fullSystemPrompt = await buildFullSystemPrompt('EXECUTIVE', whatsappCtx);
+      const keys = await getRealVaultKeys();
 
       // Build messages array with conversation history
-      const llmMessages = [
-        { role: 'system', content: fullSystemPrompt },
-        ...history.slice(-WA_HISTORY_LIMIT * 2), // inject last N turns for context
-        { role: 'user', content: message }
-      ];
-
-      // Call LLM with full history context AND dynamic tools!
-      const keys = await getRealVaultKeys();
       let messages = [
         { role: 'system', content: fullSystemPrompt },
-        ...history.slice(-WA_HISTORY_LIMIT * 2),
+        ...previousTurns,
         { role: 'user', content: message }
       ];
 
@@ -1071,17 +1122,28 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
       if (!reply && executedToolLogs.length > 0) {
         reply = `*Ações Executadas no Ecossistema:*\n\n${executedToolLogs.join('\n\n')}`;
       }
+
+      // Guardrail Check against False Positive Claims
+      reply = sanitizeFalsePositiveClaims(reply, executedToolLogs);
+
       if (!reply) throw new Error('Todas as tentativas do modelo retornaram resposta vazia.');
 
-      // Save assistant reply to history
-      appendWhatsAppHistory(sender, 'assistant', reply);
+      // Save assistant reply to PostgreSQL database
+      try {
+        await pool.query(`
+          INSERT INTO chat_messages (session_id, sender, content, agent_name, model_used, created_at)
+          VALUES ($1, 'agent', $2, 'Hermes Central Juliana', $3, NOW())
+        `, [waSessionId, reply, routing.primary]);
+      } catch (dbErr) {
+        console.warn('[WA DB SAVE AGENT MSG WARN]:', dbErr.message);
+      }
 
       return res.json({ reply });
     } catch (err) {
       console.error('[WHATSAPP AGENT REPLY ERR]:', err.message);
       return res.json({ reply: `Olá! Houve uma indisponibilidade na execução: ${err.message}` });
     }
-  }`
+  }
 
   res.json({ status: 'OK' });
 });
@@ -1447,51 +1509,68 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   // 1. Execute Real Actions if commanded by Juliana
   const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
 
-  const numericSessionId = parseInt(sessionId, 10);
+  const cleanSessionId = String(sessionId || 'session-default').trim();
 
-  // 2. Fetch User Memories & Session History for Sliding Window Summarizer & Full Context Memory
+  // Process attachments (images for vision, documents for text context)
+  let attachmentContext = '';
+  if (Array.isArray(attachments) && attachments.length > 0) {
+    attachments.forEach(att => {
+      if (att.content || att.textContent) {
+        attachmentContext += `\n[ARQUIVO ANEXADO: ${att.name || 'documento'}]\n${att.content || att.textContent}\n`;
+      }
+    });
+  }
+
+  const fullPromptMessage = attachmentContext ? `${message}\n${attachmentContext}` : message;
+
+  const routing = selectOptimalModel(fullPromptMessage, mode);
+  console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary} (Nous Portal)`);
+
+  // 1. Execute Real Atomic DB Actions if commanded by Juliana
+  const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
+
+  // 2. Persistent PostgreSQL Conversation History for Webchat (No parseInt/NaN limitation!)
+  try {
+    await pool.query(`
+      INSERT INTO chat_sessions (id, title, folder, created_at, updated_at)
+      VALUES ($1, $2, 'Geral', NOW(), NOW())
+      ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+    `, [cleanSessionId, fullPromptMessage.substring(0, 45)]);
+
+    await pool.query(`
+      INSERT INTO chat_messages (session_id, sender, content, agent_name, created_at)
+      VALUES ($1, 'user', $2, 'Juliana', NOW())
+    `, [cleanSessionId, fullPromptMessage]);
+  } catch (dbErr) {
+    console.warn('[DB SAVE USER MSG WARN]:', dbErr.message);
+  }
+
   const userMemories = await getActiveUserMemories();
   const memoriesSummary = userMemories.length > 0
     ? userMemories.map(m => `- ${m.content}`).join('\n')
     : '- Nenhuma memória persistente registrada.';
 
   let historySummaryContext = '';
-  let sessionMessages = [];
   let previousTurns = [];
 
-  if (!isNaN(numericSessionId)) {
-    try {
-      const msgRes = await pool.query(
-        'SELECT sender, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC',
-        [numericSessionId]
-      );
-      sessionMessages = msgRes.rows;
+  try {
+    const msgRes = await pool.query(
+      'SELECT sender, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 30',
+      [cleanSessionId]
+    );
+    // Exclude the last user message just inserted so it's not duplicated
+    const rows = msgRes.rows.slice(0, -1);
+    previousTurns = rows.map(m => ({
+      role: (m.sender === 'user' || m.sender === 'Juliana') ? 'user' : 'assistant',
+      content: m.content || ''
+    })).filter(m => m.content && m.content.trim().length > 0);
 
-      // Extract previous conversation turns for LLM context injection!
-      previousTurns = sessionMessages.slice(-15).map(m => ({
-        role: (m.sender === 'user' || m.sender === 'Juliana') ? 'user' : 'assistant',
-        content: m.content || ''
-      })).filter(m => m.content && m.content.trim().length > 0);
-
-      const compression = compressSessionContext(sessionMessages);
-      if (compression.isSummarized) {
-        historySummaryContext = compression.summaryContext;
-      }
-    } catch (err) {
-      console.warn('[DB SESSION HISTORY FETCH WARN]:', err.message);
+    const compression = compressSessionContext(msgRes.rows);
+    if (compression.isSummarized) {
+      historySummaryContext = compression.summaryContext;
     }
-  }
-
-  // Save current user message to database AFTER reading previous turns
-  if (!isNaN(numericSessionId)) {
-    try {
-      await pool.query(`
-        INSERT INTO chat_messages (session_id, sender, content, agent_name, created_at)
-        VALUES ($1, 'user', $2, 'Juliana', NOW())
-      `, [numericSessionId, fullPromptMessage]);
-    } catch (dbErr) {
-      console.warn('[DB SAVE USER MSG WARN]:', dbErr.message);
-    }
+  } catch (err) {
+    console.warn('[DB SESSION HISTORY FETCH WARN]:', err.message);
   }
 
   const realClickUpTasks = await fetchRealClickUpTasks();
@@ -1615,17 +1694,18 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
     }
   }
 
-  if (!isNaN(numericSessionId)) {
-    try {
-      await pool.query(`
-        INSERT INTO chat_messages (session_id, sender, content, agent_name, model_used, created_at)
-        VALUES ($1, 'agent', $2, 'Hermes Central Juliana', $3, NOW())
-      `, [numericSessionId, responseText, modelUsed]);
+  // Intercept False Positive Claims
+  responseText = sanitizeFalsePositiveClaims(responseText, executedToolLogs);
 
-      await pool.query('UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1', [numericSessionId]);
-    } catch (dbErr) {
-      console.warn('[DB SAVE AGENT MSG WARN]:', dbErr.message);
-    }
+  try {
+    await pool.query(`
+      INSERT INTO chat_messages (session_id, sender, content, agent_name, model_used, created_at)
+      VALUES ($1, 'agent', $2, 'Hermes Central Juliana', $3, NOW())
+    `, [cleanSessionId, responseText, modelUsed]);
+
+    await pool.query('UPDATE chat_sessions SET updated_at = NOW() WHERE id = $1', [cleanSessionId]);
+  } catch (dbErr) {
+    console.warn('[DB SAVE AGENT MSG WARN]:', dbErr.message);
   }
 
   // Extract memories in background for future turns
@@ -1634,7 +1714,7 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
   // Notify WebSocket listeners
   broadcastWs({
     type: 'agent_chat_response',
-    sessionId,
+    sessionId: cleanSessionId,
     message: responseText,
     model: modelUsed,
     fallback: isFallback,
