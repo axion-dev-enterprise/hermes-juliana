@@ -1523,8 +1523,9 @@ app.post('/api/v1/agent/chat', async (req, res) => {
       INSERT INTO chat_messages (session_id, sender, content, agent_name, created_at)
       VALUES ($1, 'user', $2, 'Juliana', NOW())
     `, [cleanSessionId, fullPromptMessage]);
+    console.log(`[DB SAVE SUCCESS] Message inserted for session: ${cleanSessionId}`);
   } catch (dbErr) {
-    console.warn('[DB SAVE USER MSG WARN]:', dbErr.message);
+    console.error('[DB SAVE USER MSG ERROR FULL]:', dbErr);
   }
 
   const userMemories = await getActiveUserMemories();
