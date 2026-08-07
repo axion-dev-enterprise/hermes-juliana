@@ -808,11 +808,6 @@ app.delete('/api/v1/agent/sessions/:id', async (req, res) => {
   if (idx !== -1) sessionsStore.splice(idx, 1);
   res.json({ status: 'success', message: 'Sessão excluída.' });
 });
-    console.error('[DB SESSION DELETE ERROR]:', err.message);
-  }
-  sessionsStore = sessionsStore.filter(s => s.id !== id);
-  res.json({ status: 'success', message: 'Sessão excluída com sucesso.' });
-});
 
 // FOLDERS ENDPOINTS
 app.get('/api/v1/agent/folders', async (req, res) => {
