@@ -1485,6 +1485,7 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   let responseText = '';
   let modelUsed = 'stepfun/step-3.7-flash:free';
   let isFallback = false;
+  let executedToolLogs = [];
 
   const cleanSessionId = String(sessionId || 'session-default').trim();
 
