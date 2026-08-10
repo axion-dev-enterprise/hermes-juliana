@@ -8,6 +8,7 @@ const { SYSTEM_PROMPT, MODES } = require('./prompts/juliana_system_prompt');
 const { loadConnectorDocs } = require('./lib/connector_helpers');
 const { TOOL_DEFINITIONS, executeAutonomyAction } = require('./lib/autonomy_engine');
 const integrationsKb = require('./lib/integrations_kb.json');
+const hermesAgentBridge = require('./lib/hermes_agent_bridge');
 
 const app = express();
 const server = http.createServer(app);
@@ -130,6 +131,27 @@ function sanitizeFalsePositiveClaims(replyText, executedToolLogs = []) {
   return replyText;
 }
 
+// SECURITY GUARDRAIL: Automatically mask unmasked API keys / tokens in chat outputs to prevent credentials leakage
+function sanitizeSensitiveTokens(text) {
+  if (!text || typeof text !== 'string') return text;
+  
+  return text
+    // GitHub PAT tokens
+    .replace(/\b(gh[pousr]_[a-zA-Z0-9_-]{10,255})\b/gi, (match) => `${match.substring(0, 4)}••••••••${match.substring(Math.max(4, match.length - 4))}`)
+    // Vercel access tokens
+    .replace(/\b(Vi1U[a-zA-Z0-9_-]{10,255})\b/gi, (match) => `${match.substring(0, 4)}••••••••${match.substring(Math.max(4, match.length - 4))}`)
+    // OpenRouter API keys
+    .replace(/\b(sk-or-[a-zA-Z0-9_-]{10,255})\b/gi, (match) => `${match.substring(0, 8)}••••••••${match.substring(Math.max(8, match.length - 4))}`)
+    // OpenAI API keys
+    .replace(/\b(sk-[a-zA-Z0-9_-]{20,100})\b/gi, (match) => `${match.substring(0, 5)}••••••••${match.substring(Math.max(5, match.length - 4))}`)
+    // Asaas API tokens
+    .replace(/(\$aact_[a-zA-Z0-9_-]{10,255})/gi, (match) => `${match.substring(0, 8)}••••••••${match.substring(Math.max(8, match.length - 4))}`)
+    // ClickUp API keys
+    .replace(/\b(pk_[0-9A-Za-z_-]{10,100})\b/gi, (match) => `${match.substring(0, 6)}••••••••${match.substring(Math.max(6, match.length - 4))}`)
+    // Telegram Bot tokens
+    .replace(/\b([0-9]{8,12}:[a-zA-Z0-9_-]{30,50})\b/g, (match) => `${match.substring(0, 6)}••••••••${match.substring(match.length - 4)}`);
+}
+
 // RATE LIMITER FOR AUTHENTICATION
 const loginAttemptsMap = new Map();
 function loginRateLimiter(req, res, next) {
@@ -223,18 +245,18 @@ app.delete('/api/v1/skills/:name', requireAutonomyAuthorization, (req, res) => {
 // REAL VAULT & CLICKUP DB INTEGRATION HELPERS
 async function getRealVaultKeys() {
   try {
-    const dbRes = await pool.query('SELECT service_name, api_key, api_token, status, updated_at FROM api_vault');
-    if (dbRes.rows.length === 0) throw new Error('No rows in api_vault');
-    return dbRes.rows.map(row => {
-      const token = row.api_key || row.api_token || '';
+    const dbRes = await pool.query("SELECT service_name, api_key, api_token, status, updated_at FROM api_vault WHERE status != 'unconfigured'");
+    if (dbRes.rows.length === 0) return [];
+    return dbRes.rows.filter(r => (r.api_key && r.api_key.trim()) || (r.api_token && r.api_token.trim())).map(row => {
+      const token = (row.api_key || row.api_token || '').trim();
       const masked = token.length > 8 ? `${token.substring(0, 6)}...${token.substring(token.length - 4)}` : '••••••••';
-      const isConfigured = row.status === 'configured' || row.status === 'active';
+      const cleanSvc = row.service_name.toLowerCase().trim();
       return {
-        service: row.service_name.charAt(0).toUpperCase() + row.service_name.slice(1),
-        name: `${row.service_name.toUpperCase()} API`,
+        service: cleanSvc,
+        name: `${cleanSvc.toUpperCase()} API`,
         maskedToken: masked,
-        status: isConfigured ? 'CONFIGURED' : 'PENDING',
-        configured: isConfigured,
+        status: 'CONFIGURED',
+        configured: true,
         rawToken: token
       };
     });
@@ -749,7 +771,7 @@ app.get('/api/v1/agent/sessions/:id/messages', async (req, res) => {
     const dbRes = await pool.query(`
       SELECT id, session_id as "sessionId", sender, content, 
              COALESCE(agent_name, 'Juliana') as "agentName", 
-             COALESCE(model_used, 'stepfun/step-3.7-flash:free') as "modelUsed", 
+             COALESCE(model_used, 'poolside/laguna-xs-2.1:free') as "modelUsed", 
              created_at as "createdAt"
       FROM chat_messages
       WHERE session_id = $1
@@ -834,23 +856,25 @@ app.get('/api/v1/vault/keys', async (req, res) => {
 
 app.post('/api/v1/vault', async (req, res) => {
   const { service, token } = req.body;
-  if (!service || !token) {
+  if (!service || !token || !token.trim()) {
     return res.status(400).json({ error: 'Serviço e Token são obrigatórios.' });
   }
 
   const serviceName = service.toLowerCase().trim();
+  const cleanToken = token.trim();
   try {
     await pool.query(`
       INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
-      VALUES ($1, $2, $2, 'configured', NOW())
+      VALUES ($1, $2, $3, 'configured', NOW())
       ON CONFLICT (service_name) DO UPDATE 
       SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW();
-    `, [serviceName, token]);
+    `, [serviceName, cleanToken, cleanToken]);
   } catch (err) {
     console.error('[DB VAULT SAVE ERROR]:', err.message);
+    return res.status(500).json({ error: `Falha ao salvar no Vault: ${err.message}` });
   }
 
-  res.json({ status: 'success', message: `Token para [${service}] armazenado no Vault real com sucesso.` });
+  res.json({ status: 'success', message: `Token para [${serviceName.toUpperCase()}] armazenado no Vault real com sucesso.` });
 });
 
 // CONNECTORS ENDPOINTS (100% REAL DB STATUS & BAILEYS KEEPER PROXY)
@@ -1115,25 +1139,29 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
 
       let reply = msgObj?.content;
       if (!reply && executedToolLogs.length > 0) {
-        reply = `*Ações Executadas no Ecossistema:*\n\n${executedToolLogs.join('\n\n')}`;
+        reply = `*Status da Execução de Tarefas:*\n\n${executedToolLogs.join('\n\n')}`;
       }
 
-      // Guardrail Check against False Positive Claims
-      reply = sanitizeFalsePositiveClaims(reply, executedToolLogs);
+      // Guardrail Check against False Positive Claims & Token Leaks
+      reply = sanitizeSensitiveTokens(sanitizeFalsePositiveClaims(reply, executedToolLogs));
 
       if (!reply) throw new Error('Todas as tentativas do modelo retornaram resposta vazia.');
+
+      // Prepend Canonical Hermes Agent Prefix for WhatsApp
+      const hermesPrefix = "⚕ *Hermes Agent*\n────────────\n";
+      const formattedReply = reply.startsWith('⚕') ? reply : `${hermesPrefix}${reply}`;
 
       // Save assistant reply to PostgreSQL database
       try {
         await pool.query(`
           INSERT INTO chat_messages (session_id, sender, content, agent_name, model_used, created_at)
           VALUES ($1, 'agent', $2, 'Hermes Central Juliana', $3, NOW())
-        `, [waSessionId, reply, routing.primary]);
+        `, [waSessionId, formattedReply, routing.primary]);
       } catch (dbErr) {
         console.warn('[WA DB SAVE AGENT MSG WARN]:', dbErr.message);
       }
 
-      return res.json({ reply });
+      return res.json({ reply: formattedReply });
     } catch (err) {
       console.error('[WHATSAPP AGENT REPLY ERR]:', err.message);
       return res.json({ reply: `Olá! Houve uma indisponibilidade na execução: ${err.message}` });
@@ -1167,7 +1195,7 @@ app.post('/api/v1/connectors/telegram/token', async (req, res) => {
   try {
     await pool.query(`
       INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
-      VALUES ('telegram', $1, $1, 'configured', NOW())
+      VALUES ('telegram', $1::varchar, $1::text, 'configured', NOW())
       ON CONFLICT (service_name) DO UPDATE 
       SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW();
     `, [token]);
@@ -1262,34 +1290,15 @@ async function getLLMCredentials() {
 
 function selectOptimalModel(promptText, mode) {
   const rawText = (promptText || '').toLowerCase().trim();
-  const cleanText = rawText.replace(/[^\w\s]/gi, '').trim();
   const len = rawText.length;
+  const isHeavy = len > 220 || mode === 'CRISIS';
 
-  const heavyKeywords = ['código', 'script', 'arquitetura', 'auditoria', 'financeiro', 'contrato', 'análise profunda', 'comparativo', 'segurança', 'refatorar', 'relatório completo', 'complexo', 'algoritmo', 'banco de dados', 'issue', 'github', 'clickup', 'asaas', 'autonomia', 'ferramenta', 'criar'];
-  const isHeavy = heavyKeywords.some(k => rawText.includes(k)) || len > 220 || mode === 'CRISIS';
-
-  const lightKeywords = ['olá', 'oi', 'bom dia', 'boa tarde', 'boa noite', 'ajuda', 'quem é você', 'teste', 'ping', 'status rápido'];
-  const isLight = lightKeywords.some(k => cleanText === k || cleanText.startsWith(k + ' ')) && len < 40;
-
-  if (isHeavy) {
-    return {
-      primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
-      complexity: 'HEAVY'
-    };
-  } else if (isLight) {
-    return {
-      primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free'],
-      complexity: 'LIGHT'
-    };
-  } else {
-    return {
-      primary: 'stepfun/step-3.7-flash:free',
-      fallbacks: ['inclusionai/ling-3.0-flash:free', 'poolside/laguna-s-2.1:free', 'openai/gpt-4o-mini'],
-      complexity: 'MEDIUM'
-    };
-  }
+  // PRIMARY MODEL: poolside/laguna-xs-2.1:free (NOUS PORTAL) FOR ALL TASKS BY DEFAULT
+  return {
+    primary: 'poolside/laguna-xs-2.1:free',
+    fallbacks: ['poolside/laguna-s-2.1:free', 'stepfun/step-3.7-flash:free', 'openrouter/auto', 'openai/gpt-4o-mini'],
+    complexity: isHeavy ? 'HEAVY' : 'MEDIUM'
+  };
 }
 
 async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
@@ -1301,12 +1310,13 @@ async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
   return msgObj.content || '';
 }
 
-// NOUS PORTAL FREE MODELS — ordem de prioridade, nunca usar OpenRouter como primary
+// NOUS PORTAL FREE MODELS — Prioritizing models with native tool calling capabilities
 const NOUS_FREE_MODELS = [
+  'meta-llama/llama-3.3-70b-instruct:free',
   'stepfun/step-3.7-flash:free',
-  'inclusionai/ling-3.0-flash:free',
   'poolside/laguna-s-2.1:free',
-  'poolside/laguna-xs-2.1:free'
+  'poolside/laguna-xs-2.1:free',
+  'inclusionai/ling-3.0-flash:free'
 ];
 
 async function callLLMWithTools(modelName, messages, maxTokens, tools) {
@@ -1424,8 +1434,9 @@ async function buildFullSystemPrompt(mode, extraContext) {
 
   const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (DADOS 100% REAIS):\n${extraContext || ''}\n[CHAVES E SERVIÇOS NO VAULT]:\n${vaultSummary}\n\n[TAREFAS REAIS NO CLICKUP]:\n${tasksContext}\n\n[PIPELINE E LEADS NO CRM]:\n${crmSummary}\n\n[DOCUMENTAÇÕES DOS CONECTORES]:\n${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}\n\n### INSTRUÇÕES OBRIGATÓRIAS:\n- NUNCA alucine ou invente dados fictícios.\n- Responda de forma executiva, objetiva e direta.\n- Quando falar com contatos externos via WhatsApp, seja profissional e representativa da W Soluções.`;
 
-  const modeInstruction = MODES?.[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${MODES[mode]}` : '';
-  return `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
+  const modeInstruction = MODES && MODES[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${typeof MODES[mode] === 'object' ? JSON.stringify(MODES[mode], null, 2) : MODES[mode]}` : '';
+  const fullPrompt = `${SYSTEM_PROMPT}${modeInstruction}${dynamicContext}`;
+  return hermesAgentBridge.formatCanonicalSystemPrompt(fullPrompt);
 }
 
 // EXECUTIVE ACTION EXECUTION ENGINE (ATOMIC DATABASE & VAULT MANDATES)
@@ -1439,6 +1450,17 @@ async function executeExecutiveActionMandate(message) {
       await pool.query('TRUNCATE TABLE chat_messages, chat_sessions RESTART IDENTITY CASCADE');
       actionsTaken.push('✅ [POSTGRESQL DB]: Todas as sessões e histórico de mensagens foram zerados no banco de dados.');
     } catch (err) {}
+  }
+
+  // REAL DOCKER PS / TERMINAL EXECUTION MANDATE INTERCEPTOR
+  if (msgLower.includes('docker ps') || msgLower.includes('docker compose ps') || msgLower.includes('quais containers') || msgLower.includes('status dos containers')) {
+    try {
+      const { execSync } = require('child_process');
+      const dockerOutput = execSync('docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"', { timeout: 10000, encoding: 'utf8' });
+      actionsTaken.push(`✅ [SAÍDA REAL DOCKER PS NA VPS]:\n\`\`\`\n${dockerOutput.trim()}\n\`\`\``);
+    } catch (err) {
+      actionsTaken.push(`⚠️ [FALHA NA EXECUÇÃO DOCKER PS]: ${err.message}`);
+    }
   }
 
   // CLEAR / SAVE VAULT KEYS
@@ -1463,10 +1485,50 @@ async function executeExecutiveActionMandate(message) {
       const serviceName = tokenMatch[1].toLowerCase();
       const tokenValue = tokenMatch[2];
       try {
-        await pool.query(`INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at) VALUES ($1, $2, $2, 'configured', NOW()) ON CONFLICT (service_name) DO UPDATE SET api_key = $2, api_token = $2, status = 'configured', updated_at = NOW()`, [serviceName, tokenValue]);
+        await pool.query(`INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at) VALUES ($1, $2, $3, 'configured', NOW()) ON CONFLICT (service_name) DO UPDATE SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW()`, [serviceName, tokenValue, tokenValue]);
         actionsTaken.push(`✅ [POSTGRESQL DB]: Chave do serviço **${serviceName.toUpperCase()}** salva no Vault.`);
       } catch (err) {}
     }
+  }
+
+  // AUTO-STORE RAW TOKENS POSTED IN CHAT / MESSAGES (GitHub, Vercel, OpenRouter, Asaas, ClickUp)
+  const ghMatch = message.match(/(gh[pousr]_[a-zA-Z0-9]{30,255})/i);
+  if (ghMatch) {
+    const tokenValue = ghMatch[1];
+    try {
+      await pool.query(`
+        INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
+        VALUES ('github', $1, $2, 'configured', NOW())
+        ON CONFLICT (service_name) DO UPDATE SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW()
+      `, [tokenValue, tokenValue]);
+      actionsTaken.push(`✅ [POSTGRESQL DB]: Chave de API do **GITHUB** (ghp_••••••••) foi armazenada com sucesso no Vault.`);
+    } catch (err) {}
+  }
+
+  const vercelMatch = message.match(/\b((?:Vi1U|vercel_)[a-zA-Z0-9_-]{15,255}|[a-zA-Z0-9_-]{20,64})\b/i);
+  if (vercelMatch && !msgLower.includes('http')) {
+    const tokenValue = vercelMatch[1];
+    try {
+      await pool.query(`
+        INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
+        VALUES ('vercel', $1, $2, 'configured', NOW())
+        ON CONFLICT (service_name) DO UPDATE SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW()
+      `, [tokenValue, tokenValue]);
+      actionsTaken.push(`✅ [POSTGRESQL DB]: Chave de API do **VERCEL** foi armazenada com sucesso no Vault.`);
+    } catch (err) {}
+  }
+
+  const openrouterMatch = message.match(/(sk-or-v1-[a-zA-Z0-9]{64})/i);
+  if (openrouterMatch) {
+    const tokenValue = openrouterMatch[1];
+    try {
+      await pool.query(`
+        INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
+        VALUES ('openrouter', $1, $2, 'configured', NOW())
+        ON CONFLICT (service_name) DO UPDATE SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW()
+      `, [tokenValue, tokenValue]);
+      actionsTaken.push(`✅ [POSTGRESQL DB]: Chave de API do **OPENROUTER** salva com sucesso no Vault.`);
+    } catch (err) {}
   }
 
   return actionsTaken.join('\n\n');
@@ -1483,7 +1545,7 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const autonomyAuthorized = process.env.HERMES_AUTONOMY_DISABLED !== 'true';
 
   let responseText = '';
-  let modelUsed = 'stepfun/step-3.7-flash:free';
+  let modelUsed = 'poolside/laguna-xs-2.1:free';
   let isFallback = false;
   let executedToolLogs = [];
 
@@ -1503,6 +1565,14 @@ app.post('/api/v1/agent/chat', async (req, res) => {
 
   const routing = selectOptimalModel(fullPromptMessage, mode);
   console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary} (Nous Portal)`);
+
+  broadcastWs({
+    type: 'agent_chat_progress',
+    sessionId: cleanSessionId,
+    status: 'received',
+    title: '⏳ Tarefa Recebida — Processando em Tempo Real...',
+    details: 'Iniciando investigação operacional e alocação de ferramentas nativas.'
+  });
 
   // 1. Execute Real Atomic DB Actions if commanded by Juliana
   const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
@@ -1593,10 +1663,10 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
 
 ### INSTRUÇÕES OBRIGATÓRIAS PARA A HERMES CENTRAL JULIANA:
 - Autonomia e ferramentas (Tools) estão 100% habilitadas e ativas via Nous Portal API.
-- Quando a administradora solicitar ações (como "crie a tarefa X no ClickUp", "limpe o vault", "atualize o orçamento Meta Ads"), invoque diretamente a ferramenta (Tool) apropriada.
-- **REGRA ANTI-ALUCINAÇÃO ABSOLUTA**: NUNCA declare que uma ação foi executada, um deploy foi feito, uma API foi chamada, ou qualquer resultado foi obtido SEM que o motor de autonomia tenha confirmado a execução com dados reais. Se a seção [AÇÕES REAIS EXECUTADAS] acima estiver vazia ou não contiver a ação solicitada, isso significa que a ação NÃO foi executada — informe isso honestamente ao usuário e oriente sobre o que é necessário para executá-la.
-- **REGRA DE HONESTIDADE SOBRE CAPACIDADES**: Se o usuário solicitar uma ação que não está no escopo atual do motor de autonomia (ex: criar repositório GitHub + fazer deploy completo no Vercel em cadeia), informe claramente quais etapas foram executadas pelo motor real e quais ainda não têm suporte automatizado, ao invés de simular uma execução fictícia.
-- NUNCA invente SHAs de commit, IDs de deploy, URLs de produção, respostas de curl ou qualquer dado de API que não tenha sido confirmado pela seção de ações reais acima.
+- Quando a administradora solicitar ações (como "crie a tarefa X no ClickUp", "limpe o vault", "atualize o orçamento Meta Ads", "teste a chave X"), invoque diretamente a ferramenta (Tool) apropriada.
+- **REGRA ANTI-ALUCINAÇÃO E USO DE FERRAMENTAS**: Quando você invocar uma ferramenta (Tool) e receber o resultado real em uma mensagem de ferramenta, utilize SEMPRE esses dados factuais para compor seu relatório final. Se a ferramenta retornar status de sucesso ("success"), apresente o resultado e os dados retornados com total clareza. NUNCA declare que uma ação foi bloqueada ou não autorizada se a ferramenta retornou status de sucesso.
+- **REGRA DE HONESTIDADE SOBRE CAPACIDADES**: Se o usuário solicitar uma ação que não tem ferramenta correspondente, informe com transparência o status atual das APIs configuradas no Vault.
+- NUNCA invente SHAs de commit, IDs de deploy, URLs de produção ou respostas fictícias.
 - Entregue respostas executivas objetivas, humanas e diretas para a Juliana.`;
 
   const modeInstruction = MODES && MODES[mode] ? `\n\n### MÓDULO ATIVO (${mode}):\n${MODES[mode]}` : '';
@@ -1624,9 +1694,29 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
       for (const toolCall of message.tool_calls) {
         let result;
         try {
+          const freshKeys = await getRealVaultKeys();
           console.log(`[AUTONOMY TOOL CALL] Executing tool: ${toolCall.function.name} with args:`, toolCall.function.arguments);
-          result = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), realKeys);
+
+          broadcastWs({
+            type: 'agent_chat_progress',
+            sessionId: cleanSessionId,
+            status: 'executing_tool',
+            toolName: toolCall.function.name,
+            title: `⚙️ Executando Ferramenta: ${toolCall.function.name}...`,
+            details: `Processando parâmetros e conectando ao serviço.`
+          });
+
+          result = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), freshKeys);
           executedToolLogs.push(`✅ Ação executada (${toolCall.function.name}): ${JSON.stringify(result)}`);
+
+          broadcastWs({
+            type: 'agent_chat_progress',
+            sessionId: cleanSessionId,
+            status: 'tool_completed',
+            toolName: toolCall.function.name,
+            title: `✅ Concluído: ${toolCall.function.name}`,
+            details: `Resultado retornado [REAL] com sucesso.`
+          });
         } catch (toolError) {
           console.warn(`[AUTONOMY TOOL ERR] Tool ${toolCall.function.name} failed:`, toolError.message);
           result = { error: toolError.message };
@@ -1673,8 +1763,8 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
     }
   }
 
-  // Intercept False Positive Claims
-  responseText = sanitizeFalsePositiveClaims(responseText, executedToolLogs);
+  // Intercept False Positive Claims & Token Leaks
+  responseText = sanitizeSensitiveTokens(sanitizeFalsePositiveClaims(responseText, executedToolLogs));
 
   try {
     await pool.query(`

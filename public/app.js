@@ -263,8 +263,11 @@ document.addEventListener('DOMContentLoaded', () => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'agent_chat_response') {
-            console.log('[WebSocket Chat Update]', data);
+          if (data.type === 'agent_chat_progress') {
+            console.log('[WebSocket Chat Progress]', data);
+            const title = data.title || '⏳ Tarefa em andamento...';
+            const details = data.details || data.resultSummary || '';
+            updateThinkingIndicator('current-thinking', title, details);
           }
         } catch (err) {
           console.warn('[WebSocket] Non-JSON message:', event.data);
@@ -513,7 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
     appendUserMessage(text);
     isThinking = true;
 
-    const thinkingId = `thinking-${Date.now()}`;
+    const thinkingId = 'current-thinking';
     appendThinkingIndicator(thinkingId);
 
     const currentAttachments = [...pendingAttachments];
@@ -588,14 +591,31 @@ document.addEventListener('DOMContentLoaded', () => {
     const div = document.createElement('div');
     div.id = id;
     div.className = 'message thinking-msg';
-    div.style.cssText = 'align-self: flex-start; background: rgba(99,102,241,0.08); border: 1px dashed var(--accent-primary); color: var(--accent-primary); padding: 10px 16px; border-radius: 12px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 8px;';
-    div.innerHTML = `<svg class="svg-icon fa-spin"><use href="#icon-cpu"/></svg> <span>Hermes Central está processando a requisição...</span>`;
+    div.style.cssText = 'align-self: flex-start; background: rgba(99,102,241,0.08); border: 1px dashed var(--brand); color: var(--brand); padding: 12px 18px; border-radius: 14px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; transition: all 0.3s ease;';
+    div.innerHTML = `<svg class="svg-icon fa-spin" style="width:18px;height:18px;color:var(--brand);"><use href="#icon-cpu"/></svg> <span class="thinking-title">Hermes Central está processando a requisição em tempo real...</span>`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
+  function updateThinkingIndicator(id, title, details) {
+    const el = document.getElementById(id) || document.querySelector('.thinking-msg');
+    if (el) {
+      el.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 6px; width: 100%;">
+          <div style="display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 13px; color: var(--brand);">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <span>${escapeHtml(title)}</span>
+          </div>
+          ${details ? `<div style="font-size: 11.5px; opacity: 0.85; padding-left: 24px; color: var(--text-muted); line-height: 1.4;">${escapeHtml(details)}</div>` : ''}
+        </div>
+      `;
+      const chatMessages = document.getElementById('chat-messages');
+      if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+    }
+  }
+
   function removeThinkingIndicator(id) {
-    const el = document.getElementById(id);
+    const el = document.getElementById(id) || document.querySelector('.thinking-msg');
     if (el) el.remove();
   }
 
@@ -955,12 +975,77 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   let cachedSkills = [];
+  function parseSkillMetadata(skill) {
+    const name = skill.name || '';
+    const content = skill.content || '';
+
+    let meta = { label: 'Skill Operacional', icon: 'fa-solid fa-wand-magic-sparkles', color: '#6366f1', bg: 'rgba(99, 102, 241, 0.08)', border: 'rgba(99, 102, 241, 0.25)' };
+
+    if (name.includes('vault') || name.includes('key')) {
+      meta = { label: 'Segurança & Vault', icon: 'fa-solid fa-shield-halved', color: '#8b5cf6', bg: 'rgba(139, 92, 246, 0.08)', border: 'rgba(139, 92, 246, 0.25)' };
+    } else if (name.includes('meta') || name.includes('ads')) {
+      meta = { label: 'Meta Ads & Tráfego', icon: 'fa-solid fa-bullhorn', color: '#ec4899', bg: 'rgba(236, 72, 153, 0.08)', border: 'rgba(236, 72, 153, 0.25)' };
+    } else if (name.includes('devops') || name.includes('vps') || name.includes('docker')) {
+      meta = { label: 'DevOps & VPS', icon: 'fa-solid fa-server', color: '#10b981', bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.25)' };
+    } else if (name.includes('clickup') || name.includes('task')) {
+      meta = { label: 'Gestão & ClickUp', icon: 'fa-solid fa-list-check', color: '#06b6d4', bg: 'rgba(6, 182, 212, 0.08)', border: 'rgba(6, 182, 212, 0.25)' };
+    } else if (name.includes('asaas') || name.includes('billing') || name.includes('finance')) {
+      meta = { label: 'Financeiro & Asaas', icon: 'fa-solid fa-wallet', color: '#10b981', bg: 'rgba(16, 185, 129, 0.08)', border: 'rgba(16, 185, 129, 0.25)' };
+    } else if (name.includes('landing') || name.includes('deploy') || name.includes('vercel')) {
+      meta = { label: 'Deploy & Vercel', icon: 'fa-solid fa-rocket', color: '#f97316', bg: 'rgba(249, 115, 22, 0.08)', border: 'rgba(249, 115, 22, 0.25)' };
+    } else if (name.includes('whatsapp') || name.includes('message')) {
+      meta = { label: 'WhatsApp Executivo', icon: 'fa-brands fa-whatsapp', color: '#22c55e', bg: 'rgba(34, 197, 94, 0.08)', border: 'rgba(34, 197, 94, 0.25)' };
+    }
+
+    let cleanText = content
+      .replace(/^#+.*$/gm, '')
+      .replace(/VERSIÓN:.*$/gm, '')
+      .replace(/HERMES CENTRAL.*$/gm, '')
+      .replace(/[\*\_\#\`]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!cleanText || cleanText.length < 5) cleanText = 'Skill procedural registrada no runtime do Hermes Central.';
+    const summary = cleanText.length > 140 ? `${cleanText.substring(0, 140)}...` : cleanText;
+
+    return { meta, summary };
+  }
+
   async function loadSkills() {
     const list = document.getElementById('skills-list');
     try {
       const res = await fetch('/api/v1/skills'); if (!res.ok) throw new Error('Falha ao carregar');
       const data = await res.json(); cachedSkills = data.skills || [];
-      if (list) list.innerHTML = cachedSkills.length ? cachedSkills.map((skill) => `<article class="skill-card"><div class="skill-card-head"><i class="fa-solid fa-wand-magic-sparkles"></i><strong>${escapeHtml(skill.name)}</strong></div><p>${escapeHtml((skill.content || '').replace(/^#\s*/m, '').slice(0, 130)) || 'Sem descrição'}</p><div><button class="text-btn" data-action="skill-edit" data-skill="${escapeHtml(skill.name)}">Editar</button><button class="text-btn danger" data-action="skill-delete" data-skill="${escapeHtml(skill.name)}">Excluir</button></div></article>`).join('') : '<div class="vault-empty">Nenhuma skill operacional criada.</div>';
+      if (list) {
+        list.className = 'skills-grid-v2';
+        list.innerHTML = cachedSkills.length ? cachedSkills.map((skill) => {
+          const { meta, summary } = parseSkillMetadata(skill);
+          return `
+            <article class="skill-card-v2" style="--card-accent: ${meta.color}">
+              <div>
+                <div class="skill-card-top">
+                  <span class="skill-badge" style="color: ${meta.color}; background: ${meta.bg}; border: 1px solid ${meta.border}">
+                    <i class="${meta.icon}"></i> ${meta.label}
+                  </span>
+                  <span class="skill-status-pill"><i class="fa-solid fa-circle-check"></i> Ativa</span>
+                </div>
+                <div class="skill-card-title-row">
+                  <h3 class="skill-card-title">${escapeHtml(skill.name)}</h3>
+                </div>
+                <p class="skill-card-desc">${escapeHtml(summary)}</p>
+              </div>
+              <div class="skill-card-footer">
+                <button class="skill-btn-action edit" data-action="skill-edit" data-skill="${escapeHtml(skill.name)}">
+                  <i class="fa-solid fa-pen-to-square"></i> Editar
+                </button>
+                <button class="skill-btn-action delete" data-action="skill-delete" data-skill="${escapeHtml(skill.name)}">
+                  <i class="fa-solid fa-trash-can"></i> Excluir
+                </button>
+              </div>
+            </article>
+          `;
+        }).join('') : '<div class="vault-empty">Nenhuma skill operacional criada.</div>';
+      }
     } catch (err) { if (list) list.innerHTML = '<div class="vault-empty">Não foi possível carregar as skills.</div>'; }
   }
   function openSkillEditor(skill = null) {

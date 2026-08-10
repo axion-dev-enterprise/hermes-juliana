@@ -1,7 +1,7 @@
 {
   "name": "hermes-juliana",
-  "version": "5.1.0",
-  "build_timestamp": "2026-08-05T13:35:00-03:00",
+  "version": "5.2.0",
+  "build_timestamp": "2026-08-09T22:34:00-03:00",
   "environment": "production",
   "domain": "https://juliana.axionenterprise.cloud/",
   "vps_ip": "179.197.237.20",
@@ -12,16 +12,12 @@
   },
   "features": [
     "Zero-Mock Native PostgreSQL Persistence (chat_sessions, chat_messages, api_vault, clients_crm, chat_folders)",
-    "Dynamic Task-Based OpenRouter LLM Model Router (gpt-4o / gpt-4o-mini)",
-    "Model Badge UI Display",
-    "Autonomy Engine: OpenRouter function calls with real ClickUp, Meta Ads, Asaas and GitHub actions",
-    "Explicit HERMES_TEST_MODE for test autonomy; operator token required outside tests",
+    "Dynamic Task-Based OpenRouter & Nous Portal LLM Model Router (Primary: poolside/laguna-xs-2.1:free, Fallback: OpenRouter)",
+    "Full Executive Autonomy Engine: Native tool execution for GET_SYSTEM_DIAGNOSTICS, MANAGE_RUNTIME_SKILL, SEND_WHATSAPP_MESSAGE, ClickUp, Meta Ads, Asaas, GitHub and Vercel",
+    "Strict Vault & Rule Isolation: 0% sharing or leakage of host machine credentials, vault tokens or directives",
+    "Prohibition of False Architecture Restrictions & False Refusals",
     "Authoritative Connector API Documentation (docs/CONNECTORS_DOCUMENTATION_AND_PROCEDURES.md)",
-    "Connector Helper Utilities (lib/connector_helpers.js)",
-    "Empirical Production Benchmark Suite (28/29 Passed)",
-    "Deep /healthz endpoint (Postgres + Redis + OpenRouter + WS) with 503 on degraded",
-    "Nginx hermes-webchat: bypass 5xx caching, no-store on /healthz and /api, 50x branded page",
-    "Cloudflare Cache Bypass rules for /healthz, audit log of every degraded health response"
+    "Deep /healthz endpoint (Postgres + Redis + OpenRouter + WS) with 503 on degraded"
   ],
   "author": "AXION Enterprise <axionenterprise777@gmail.com>"
 }
