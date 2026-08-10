@@ -1153,6 +1153,8 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
       let msgObj = await callLLMWithTools(routing.primary, messages, 1200, TOOL_DEFINITIONS);
       const executedToolLogs = [];
 
+      const isGroup = sender && String(sender).includes('@g.us');
+
       // Multi-turn tool execution loop for WhatsApp (Hermes Agent Architecture V6.2.0)
       for (let turn = 0; turn < 5 && Array.isArray(msgObj?.tool_calls) && msgObj.tool_calls.length; turn += 1) {
         messages.push(msgObj);
@@ -1160,17 +1162,19 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
           let toolResult;
           try {
             console.log(`[WHATSAPP AUTONOMY TOOL] Executing: ${toolCall.function.name} with args:`, toolCall.function.arguments);
-            // Real-time progress notification to WhatsApp user (Issue #20)
-            try {
-              await fetch(`${WHATSAPP_KEEPER_URL}/send`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  recipient: sender,
-                  message: `⚙️ *[Hermes Juliana]* Executando ferramenta: _${toolCall.function.name}_...`
-                })
-              }).catch(() => {});
-            } catch (waProgressErr) {}
+            // Intermediate progress notification for individual chats (suppressed in groups to avoid spam)
+            if (!isGroup) {
+              try {
+                await fetch(`${WHATSAPP_KEEPER_URL}/send`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    recipient: sender,
+                    message: `⚙️ *[Hermes Juliana]* Executando: _${toolCall.function.name}_...`
+                  })
+                }).catch(() => {});
+              } catch (waProgressErr) {}
+            }
 
             toolResult = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), keys);
             executedToolLogs.push(`✅ [${toolCall.function.name}]: ${JSON.stringify(toolResult)}`);
@@ -1185,8 +1189,16 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
       }
 
       let reply = msgObj?.content;
-      if (!reply && executedToolLogs.length > 0) {
-        reply = `*Status da Execução de Tarefas:*\n\n${executedToolLogs.join('\n\n')}`;
+      
+      // If LLM output is empty after tool execution, force a natural language synthesis turn (Zero Raw JSON)
+      if ((!reply || reply.trim().length < 5) && executedToolLogs.length > 0) {
+        console.log('[WHATSAPP SYNTHESIS] Sintetizando resposta executiva em linguagem natural em português...');
+        messages.push({
+          role: 'user',
+          content: 'Por favor, apresente um resumo executivo limpo, profissional e direto em português para o WhatsApp com base no resultado das ações executadas. NÃO exiba JSON puro nem código técnico.'
+        });
+        const finalSynthObj = await callLLMWithTools(routing.primary, messages, 1000, []);
+        reply = finalSynthObj?.content;
       }
 
       // Guardrail Check against False Positive Claims & Token Leaks
