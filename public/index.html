@@ -689,7 +689,11 @@
     <form id="crm-lead-form" class="modal-card">
       <div class="modal-heading"><div><span class="eyebrow">CRM OPERACIONAL</span><h3>Novo lead ou oportunidade</h3></div><button type="button" class="icon-close" data-action="crm-modal-close" aria-label="Fechar">×</button></div>
       <div class="modal-form-grid"><label>Nome<input id="crm-lead-name" name="name" required maxlength="160" placeholder="Nome do contato"></label><label>Empresa<input id="crm-lead-company" name="company" maxlength="160" placeholder="Empresa / grupo"></label><label>Valor<input id="crm-lead-value" name="value" maxlength="50" placeholder="R$ 0,00 ou A qualificar"></label><label>Estágio<select id="crm-lead-stage" name="stage"><option value="lead_recebido">Lead recebido</option><option value="reuniao_agendada">Reunião</option><option value="proposta_enviada">Proposta</option><option value="fechado_ganho">Fechado</option></select></label></div>
-      <div class="modal-actions"><button type="button" class="connector-btn ghost-btn" data-action="crm-modal-close">Cancelar</button><button type="submit" class="connector-btn">Salvar lead</button></div>
+      <div class="modal-actions">
+        <button type="button" id="btn-delete-crm-lead" class="connector-btn ghost-btn text-danger hidden" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.3); margin-right: auto;">Excluir Lead</button>
+        <button type="button" class="connector-btn ghost-btn" data-action="crm-modal-close">Cancelar</button>
+        <button type="submit" class="connector-btn">Salvar lead</button>
+      </div>
     </form>
   </div>
 

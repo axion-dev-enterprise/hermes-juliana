@@ -905,14 +905,20 @@ document.addEventListener('DOMContentLoaded', () => {
   // -------------------------------------------------------------
   // 8. CRM KANBAN BOARD (/api/v1/crm/leads)
   // -------------------------------------------------------------
+  // -------------------------------------------------------------
+  // 8. CRM KANBAN BOARD WITH DRAG & DROP & MANUAL EDITING (/api/v1/crm/leads)
+  // -------------------------------------------------------------
+  let currentCrmLeads = [];
+  let editingLeadId = null;
+
   async function loadCrmLeads() {
     try {
       const res = await fetch('/api/v1/crm/leads');
       if (!res.ok) throw new Error('Erro CRM');
       const data = await res.json();
-      const leads = data.data || data;
+      currentCrmLeads = data.data || data || [];
 
-      renderCrmBoard(leads);
+      renderCrmBoard(currentCrmLeads);
       loadCrmOverview();
     } catch (err) {
       console.warn('[CRM] Usando dados default local:', err);
@@ -933,15 +939,89 @@ document.addEventListener('DOMContentLoaded', () => {
       filtered.forEach(l => {
         const score = Number(l.lead_score || 0);
         html += `
-          <div class="kanban-card" data-lead-id="${escapeHtml(l.id)}">
-            <div class="kanban-card-top"><div class="kanban-card-name">${escapeHtml(l.name)}</div>${score ? `<span class="lead-score ${score >= 70 ? 'hot' : ''}">${score}</span>` : ''}</div>
+          <div class="kanban-card" draggable="true" data-lead-id="${escapeHtml(l.id)}" data-action="edit-crm-lead">
+            <div class="kanban-card-top">
+              <div class="kanban-card-name">${escapeHtml(l.name)}</div>
+              ${score ? `<span class="lead-score ${score >= 70 ? 'hot' : ''}">${score}</span>` : ''}
+            </div>
             <div class="kanban-card-company">${escapeHtml(l.company || 'Empresa')}</div>
             <div class="kanban-card-value">${escapeHtml(l.value || 'R$ 0,00')}</div>
-            <div class="lead-meta">${l.source === 'whatsapp' ? '<i class="fa-brands fa-whatsapp"></i> WhatsApp' : '<i class="fa-solid fa-user-pen"></i> Manual'}</div>
+            <div class="lead-meta flex-between" style="display:flex; justify-content:space-between; align-items:center; margin-top:8px;">
+              <span>${l.source === 'whatsapp' ? '<i class="fa-brands fa-whatsapp" style="color:#22c55e;"></i> WhatsApp' : '<i class="fa-solid fa-user-pen"></i> Manual'}</span>
+              <span class="edit-hint" style="font-size:10px; opacity:0.7;"><i class="fa-solid fa-pen"></i> Editar</span>
+            </div>
           </div>
         `;
       });
       col.innerHTML = html || `<div style="font-size: 11px; color: var(--text-muted); text-align: center; padding: 20px;">Nenhum lead</div>`;
+    });
+
+    initKanbanDragAndDrop();
+  }
+
+  function initKanbanDragAndDrop() {
+    const board = document.querySelector('.kanban-board');
+    if (!board || board.getAttribute('data-drag-initialized')) return;
+    board.setAttribute('data-drag-initialized', 'true');
+
+    board.addEventListener('dragstart', (e) => {
+      const card = e.target.closest('.kanban-card');
+      if (card) {
+        const leadId = card.getAttribute('data-lead-id');
+        e.dataTransfer.setData('text/plain', leadId);
+        card.classList.add('dragging');
+      }
+    });
+
+    board.addEventListener('dragend', (e) => {
+      const card = e.target.closest('.kanban-card');
+      if (card) card.classList.remove('dragging');
+      document.querySelectorAll('.kanban-column').forEach(c => c.classList.remove('drag-over'));
+    });
+
+    board.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      const col = e.target.closest('.kanban-column');
+      if (col) col.classList.add('drag-over');
+    });
+
+    board.addEventListener('dragleave', (e) => {
+      const col = e.target.closest('.kanban-column');
+      if (col && !col.contains(e.relatedTarget)) {
+        col.classList.remove('drag-over');
+      }
+    });
+
+    board.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      document.querySelectorAll('.kanban-column').forEach(c => c.classList.remove('drag-over'));
+      const col = e.target.closest('.kanban-column');
+      if (!col) return;
+
+      const leadId = e.dataTransfer.getData('text/plain');
+      const cardsContainer = col.querySelector('.kanban-cards');
+      if (!cardsContainer) return;
+
+      const newStage = cardsContainer.id.replace('cards-', '');
+      if (!leadId || !newStage) return;
+
+      // Optimistic update
+      const leadObj = currentCrmLeads.find(l => String(l.id) === String(leadId));
+      if (leadObj && leadObj.stage !== newStage) {
+        leadObj.stage = newStage;
+        renderCrmBoard(currentCrmLeads);
+
+        // Update backend
+        try {
+          await fetch(`/api/v1/crm/leads/${leadId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ stage: newStage })
+          });
+        } catch (err) {
+          console.warn('[CRM DRAG UPDATE WARN]:', err.message);
+        }
+      }
     });
   }
 
@@ -957,20 +1037,76 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) { console.warn('[CRM overview]', err); }
   }
 
-  function openCrmLeadModal() {
+  function openCrmLeadModal(lead = null) {
     const modal = document.getElementById('crm-lead-modal');
-    if (modal) { modal.classList.remove('hidden'); document.getElementById('crm-lead-name')?.focus(); }
+    if (!modal) return;
+
+    editingLeadId = lead ? lead.id : null;
+    const titleEl = modal.querySelector('.modal-heading h3');
+    const deleteBtn = document.getElementById('btn-delete-crm-lead');
+
+    if (lead) {
+      if (titleEl) titleEl.textContent = 'Editar Lead / Oportunidade';
+      document.getElementById('crm-lead-name').value = lead.name || '';
+      document.getElementById('crm-lead-company').value = lead.company || '';
+      document.getElementById('crm-lead-value').value = lead.value || '';
+      document.getElementById('crm-lead-stage').value = lead.stage || 'lead_recebido';
+      if (deleteBtn) deleteBtn.classList.remove('hidden');
+    } else {
+      if (titleEl) titleEl.textContent = 'Novo lead ou oportunidade';
+      document.getElementById('crm-lead-form')?.reset();
+      if (deleteBtn) deleteBtn.classList.add('hidden');
+    }
+
+    modal.classList.remove('hidden');
+    document.getElementById('crm-lead-name')?.focus();
   }
-  function closeCrmLeadModal() { document.getElementById('crm-lead-modal')?.classList.add('hidden'); }
+
+  function closeCrmLeadModal() {
+    editingLeadId = null;
+    document.getElementById('crm-lead-modal')?.classList.add('hidden');
+  }
+
   function initCrmLeadModal() {
     document.getElementById('crm-lead-form')?.addEventListener('submit', async (event) => {
-      event.preventDefault(); const form = new FormData(event.currentTarget);
+      event.preventDefault();
+      const form = new FormData(event.currentTarget);
       const payload = Object.fromEntries(form.entries());
+
       try {
-        const res = await fetch('/api/v1/crm/leads', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        let res;
+        if (editingLeadId) {
+          res = await fetch(`/api/v1/crm/leads/${editingLeadId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        } else {
+          res = await fetch('/api/v1/crm/leads', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+          });
+        }
         if (!res.ok) throw new Error('Falha ao salvar lead');
-        event.currentTarget.reset(); closeCrmLeadModal(); loadCrmLeads();
-      } catch (err) { console.error('[CRM Add Lead Error]', err); }
+        event.currentTarget.reset();
+        closeCrmLeadModal();
+        loadCrmLeads();
+      } catch (err) {
+        console.error('[CRM Add/Edit Lead Error]', err);
+      }
+    });
+
+    document.getElementById('btn-delete-crm-lead')?.addEventListener('click', async () => {
+      if (!editingLeadId) return;
+      try {
+        const res = await fetch(`/api/v1/crm/leads/${editingLeadId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error('Falha ao excluir lead');
+        closeCrmLeadModal();
+        loadCrmLeads();
+      } catch (err) {
+        console.error('[CRM Delete Lead Error]', err);
+      }
     });
   }
 
@@ -1219,10 +1355,18 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      // Adicionar Lead CRM
+      // Adicionar ou Editar Lead CRM
       const btnAddLead = e.target.closest('#btn-add-lead-modal');
       if (btnAddLead) {
         openCrmLeadModal();
+        return;
+      }
+
+      const cardEditLead = e.target.closest('[data-action="edit-crm-lead"]');
+      if (cardEditLead) {
+        const leadId = cardEditLead.getAttribute('data-lead-id');
+        const leadObj = currentCrmLeads.find(l => String(l.id) === String(leadId));
+        if (leadObj) openCrmLeadModal(leadObj);
         return;
       }
 

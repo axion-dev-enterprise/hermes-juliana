@@ -1291,17 +1291,44 @@ app.post('/api/v1/crm/leads', async (req, res) => {
 
 app.patch('/api/v1/crm/leads/:id', async (req, res) => {
   const allowedStages = ['lead_recebido', 'reuniao_agendada', 'proposta_enviada', 'fechado_ganho'];
-  const { stage, company, value } = req.body || {};
+  const { name, stage, company, value, lead_score } = req.body || {};
   if (stage && !allowedStages.includes(stage)) return res.status(400).json({ error: 'Estágio inválido.' });
   try {
     const updated = await pool.query(`UPDATE clients_crm SET
-      stage = COALESCE($1, stage), company = COALESCE($2, company), value = COALESCE($3, value)
-      WHERE id = $4 RETURNING id::text, name, company, value, stage, source, classification, lead_score, whatsapp_sender`,
-      [stage || null, company || null, value || null, req.params.id]);
-    if (!updated.rows[0]) return res.status(404).json({ error: 'Lead não encontrado.' });
+      name = COALESCE($1, name),
+      stage = COALESCE($2, stage),
+      company = COALESCE($3, company),
+      value = COALESCE($4, value),
+      lead_score = COALESCE($5, lead_score)
+      WHERE id::text = $6 RETURNING id::text, name, company, value, stage, source, classification, lead_score, whatsapp_sender`,
+      [name || null, stage || null, company || null, value || null, lead_score !== undefined ? Number(lead_score) : null, req.params.id]);
+    if (!updated.rows[0]) {
+      // Memory fallback for local lead store
+      const item = crmLeadsStore.find(l => String(l.id) === String(req.params.id));
+      if (item) {
+        if (name) item.name = name;
+        if (stage) item.stage = stage;
+        if (company) item.company = company;
+        if (value) item.value = value;
+        if (lead_score) item.lead_score = Number(lead_score);
+        return res.json({ status: 'success', lead: item });
+      }
+      return res.status(404).json({ error: 'Lead não encontrado.' });
+    }
     return res.json({ status: 'success', lead: updated.rows[0] });
   } catch (err) {
     return res.status(500).json({ error: 'Não foi possível atualizar o lead.' });
+  }
+});
+
+app.delete('/api/v1/crm/leads/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM clients_crm WHERE id::text = $1', [req.params.id]);
+    const idx = crmLeadsStore.findIndex(l => String(l.id) === String(req.params.id));
+    if (idx !== -1) crmLeadsStore.splice(idx, 1);
+    return res.json({ status: 'success', message: 'Lead excluído com sucesso.' });
+  } catch (err) {
+    return res.status(500).json({ error: 'Erro ao excluir lead.' });
   }
 });
 
