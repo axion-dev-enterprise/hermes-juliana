@@ -1189,33 +1189,48 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
       }
 
       let reply = msgObj?.content;
-      
-      // If LLM output is empty after tool execution, force a natural language synthesis turn (Zero Raw JSON)
-      if ((!reply || reply.trim().length < 5) && executedToolLogs.length > 0) {
-        console.log('[WHATSAPP SYNTHESIS] Sintetizando resposta executiva em linguagem natural em português...');
-        try {
-          messages.push({
-            role: 'user',
-            content: 'Por favor, apresente um resumo executivo limpo, profissional e direto em português para o WhatsApp com base no resultado das ações executadas. NÃO exiba JSON puro nem código técnico.'
-          });
-          const finalSynthObj = await callLLMWithTools('meta-llama/llama-3.3-70b-instruct:free', messages, 1000, []);
-          reply = finalSynthObj?.content;
-        } catch (synthErr) {
-          console.warn('[WHATSAPP SYNTHESIS WARN]:', synthErr.message);
+
+      // ALWAYS force a clean natural language synthesis turn whenever tools were executed.
+      // The model tends to regurgitate raw JSON tool results in its content even when non-empty.
+      if (executedToolLogs.length > 0) {
+        const looksLikeRawJson = !reply || reply.trim().length < 5
+          || /\{"status"/.test(reply)
+          || /\[GET_/.test(reply)
+          || /✅ \[/.test(reply)
+          || (reply.includes('{') && reply.includes('"status":'));
+
+        if (looksLikeRawJson) {
+          console.log('[WHATSAPP SYNTHESIS] Resposta contém JSON bruto — forçando síntese executiva em português...');
+          try {
+            const synthMessages = [
+              ...messages.filter(m => m.role !== 'user' || !m.content?.includes('apresente um resumo')),
+              {
+                role: 'user',
+                content: 'Resuma em linguagem natural, em português, de forma clara e direta para WhatsApp, os resultados das ações executadas. NÃO inclua JSON, código técnico, chaves {}, colchetes [] nem símbolos de programação. Seja objetivo e profissional.'
+              }
+            ];
+            const finalSynthObj = await callLLMWithTools('meta-llama/llama-3.3-70b-instruct:free', synthMessages, 800, []);
+            if (finalSynthObj?.content && finalSynthObj.content.trim().length > 5) {
+              reply = finalSynthObj.content;
+            }
+          } catch (synthErr) {
+            console.warn('[WHATSAPP SYNTHESIS WARN]:', synthErr.message);
+          }
         }
       }
 
-      // If reply is STILL empty, generate clean natural language bullet list (NO RAW JSON)
-      if (!reply || reply.trim().length < 5) {
+      // Absolute fallback: clean bullet list — zero raw JSON guaranteed
+      if (!reply || reply.trim().length < 5 || /\{"status"/.test(reply) || /✅ \[/.test(reply)) {
         if (executedToolLogs.length > 0) {
           const cleanSummary = executedToolLogs.map(log => {
             const toolMatch = log.match(/\[([A-Z0-9_]+)\]/);
             const toolName = toolMatch ? toolMatch[1] : 'Ação Operacional';
-            return `• *${toolName.replace(/_/g, ' ')}*: Executado com sucesso.`;
+            const wasSuccess = log.startsWith('✅');
+            return `${wasSuccess ? '✅' : '⚠️'} *${toolName.replace(/_/g, ' ')}*: ${wasSuccess ? 'Executado com sucesso.' : 'Falhou — verifique credenciais.'}`;
           }).join('\n');
-          reply = `Juliana processou sua solicitação com sucesso:\n\n${cleanSummary}\n\n_Todos os sistemas operacionais estão ativos e validados._`;
+          reply = `*Juliana* processou sua solicitação:\n\n${cleanSummary}\n\n_Todos os sistemas do ecossistema AXION estão operacionais._`;
         } else {
-          reply = "Juliana recebeu sua mensagem. Todos os serviços do ecossistema W Soluções Tecnologia estão operacionais.";
+          reply = 'Juliana recebeu sua mensagem. Todos os serviços do ecossistema W Soluções Tecnologia estão operacionais.';
         }
       }
 
