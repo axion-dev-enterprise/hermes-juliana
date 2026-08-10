@@ -1397,10 +1397,10 @@ function selectOptimalModel(promptText, mode) {
   const len = rawText.length;
   const isHeavy = len > 220 || mode === 'CRISIS';
 
-  // PRIMARY MODEL: poolside/laguna-xs-2.1:free (NOUS PORTAL) FOR ALL TASKS BY DEFAULT
+  // PRIMARY MODEL: meta-llama/llama-3.3-70b-instruct:free — proven tool calling support
   return {
-    primary: 'poolside/laguna-xs-2.1:free',
-    fallbacks: ['poolside/laguna-s-2.1:free', 'stepfun/step-3.7-flash:free', 'openrouter/auto', 'openai/gpt-4o-mini'],
+    primary: 'meta-llama/llama-3.3-70b-instruct:free',
+    fallbacks: ['google/gemini-2.0-flash-exp:free', 'qwen/qwen-2.5-coder-32b-instruct:free', 'stepfun/step-3.7-flash:free'],
     complexity: isHeavy ? 'HEAVY' : 'MEDIUM'
   };
 }
@@ -1649,7 +1649,7 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const autonomyAuthorized = process.env.HERMES_AUTONOMY_DISABLED !== 'true';
 
   let responseText = '';
-  let modelUsed = 'poolside/laguna-xs-2.1:free';
+  let modelUsed = 'meta-llama/llama-3.3-70b-instruct:free';
   let isFallback = false;
   let executedToolLogs = [];
 
