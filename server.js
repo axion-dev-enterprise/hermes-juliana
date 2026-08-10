@@ -138,6 +138,8 @@ function sanitizeSensitiveTokens(text) {
   return text
     // GitHub PAT tokens
     .replace(/\b(gh[pousr]_[a-zA-Z0-9_-]{10,255})\b/gi, (match) => `${match.substring(0, 4)}••••••••${match.substring(Math.max(4, match.length - 4))}`)
+    // Vercel vcp_ access tokens
+    .replace(/\b(vcp_[a-zA-Z0-9_-]{10,255})\b/gi, (match) => `${match.substring(0, 6)}••••••••${match.substring(Math.max(6, match.length - 4))}`)
     // Vercel access tokens
     .replace(/\b(Vi1U[a-zA-Z0-9_-]{10,255})\b/gi, (match) => `${match.substring(0, 4)}••••••••${match.substring(Math.max(4, match.length - 4))}`)
     // OpenRouter API keys
@@ -151,6 +153,17 @@ function sanitizeSensitiveTokens(text) {
     // Telegram Bot tokens
     .replace(/\b([0-9]{8,12}:[a-zA-Z0-9_-]{30,50})\b/g, (match) => `${match.substring(0, 6)}••••••••${match.substring(match.length - 4)}`);
 }
+
+// Periodic Vault Token Healthcheck & Audit Job (Issue #21)
+setInterval(async () => {
+  try {
+    const keys = await getRealVaultKeys();
+    const activeServices = Object.keys(keys);
+    console.log(`[VAULT AUDIT CRON] ${activeServices.length} credenciais ativas no Vault:`, activeServices.join(', '));
+  } catch (auditErr) {
+    console.warn('[VAULT AUDIT CRON WARN]:', auditErr.message);
+  }
+}, 300000);
 
 // RATE LIMITER FOR AUTHENTICATION
 const loginAttemptsMap = new Map();
