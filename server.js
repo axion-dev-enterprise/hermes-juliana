@@ -1209,7 +1209,7 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
                 content: 'Resuma em linguagem natural, em português, de forma clara e direta para WhatsApp, os resultados das ações executadas. NÃO inclua JSON, código técnico, chaves {}, colchetes [] nem símbolos de programação. Seja objetivo e profissional.'
               }
             ];
-            const finalSynthObj = await callLLMWithTools('meta-llama/llama-3.3-70b-instruct:free', synthMessages, 800, []);
+            const finalSynthObj = await callLLMWithTools('poolside/laguna-xs-2.1:free', synthMessages, 800, []);
             if (finalSynthObj?.content && finalSynthObj.content.trim().length > 5) {
               reply = finalSynthObj.content;
             }
@@ -1412,10 +1412,9 @@ function selectOptimalModel(promptText, mode) {
   const len = rawText.length;
   const isHeavy = len > 220 || mode === 'CRISIS';
 
-  // PRIMARY MODEL: meta-llama/llama-3.3-70b-instruct:free — proven tool calling support
   return {
-    primary: 'meta-llama/llama-3.3-70b-instruct:free',
-    fallbacks: ['google/gemini-2.0-flash-exp:free', 'qwen/qwen-2.5-coder-32b-instruct:free', 'stepfun/step-3.7-flash:free'],
+    primary: 'poolside/laguna-xs-2.1:free',
+    fallbacks: ['stepfun/step-3.7-flash:free', 'tencent/hy3:free'],
     complexity: isHeavy ? 'HEAVY' : 'MEDIUM'
   };
 }
@@ -1429,13 +1428,13 @@ async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
   return msgObj.content || '';
 }
 
-// NOUS PORTAL FREE MODELS — Prioritizing models with native tool calling capabilities
+// NOUS PORTAL FREE MODELS — Only models confirmed available on Nous Portal
 const NOUS_FREE_MODELS = [
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'google/gemini-2.0-flash-exp:free',
-  'qwen/qwen-2.5-coder-32b-instruct:free',
+  'poolside/laguna-xs-2.1:free',
   'stepfun/step-3.7-flash:free',
-  'inclusionai/ling-3.0-flash:free'
+  'tencent/hy3:free',
+  'meta-llama/llama-3.3-70b-instruct',
+  'qwen/qwen3-8b'
 ];
 
 async function callLLMWithTools(modelName, messages, maxTokens, tools) {
@@ -1664,7 +1663,7 @@ app.post('/api/v1/agent/chat', async (req, res) => {
   const autonomyAuthorized = process.env.HERMES_AUTONOMY_DISABLED !== 'true';
 
   let responseText = '';
-  let modelUsed = 'meta-llama/llama-3.3-70b-instruct:free';
+  let modelUsed = 'poolside/laguna-xs-2.1:free';
   let isFallback = false;
   let executedToolLogs = [];
 
