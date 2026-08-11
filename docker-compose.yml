@@ -39,9 +39,9 @@ services:
     container_name: hermes-webchat
     restart: always
     ports:
-      - "8080:80"
+      - "80:80"
     depends_on:
-      - hermes-gateway-juliana
+      - hermes-gateway
     networks:
       - hermes-network
 
