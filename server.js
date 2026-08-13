@@ -1706,6 +1706,8 @@ async function executeExecutiveActionMandate(message) {
     if (msgLower.includes('whatsapp')) servicesToClean.push('whatsapp');
     if (msgLower.includes('clickup')) servicesToClean.push('clickup');
     if (msgLower.includes('meta')) servicesToClean.push('meta');
+    if (msgLower.includes('github')) servicesToClean.push('github');
+    if (msgLower.includes('vercel')) servicesToClean.push('vercel');
     if (servicesToClean.length > 0) {
       try {
         await pool.query(`UPDATE api_vault SET api_key = NULL, api_token = NULL, status = 'unconfigured', updated_at = NOW() WHERE LOWER(service_name) = ANY($1::text[])`, [servicesToClean]);
