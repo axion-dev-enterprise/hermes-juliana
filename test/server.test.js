@@ -117,3 +117,17 @@ test('Hermes Juliana - production hardening contracts', () => {
   assert.ok(workerContent.includes('MAX_ACTIVE_WORKERS'));
   assert.ok(workerContent.includes("fork(path.join(__dirname, 'tool_worker_child.js')"));
 });
+
+test('Hermes Juliana v6.5 - Session FSM & RAG Migration 002 contracts', () => {
+  const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  assert.ok(fs.existsSync(path.join(__dirname, '../migrations/002_fsm_and_embeddings.sql')), 'Migration 002 must exist');
+  assert.ok(fs.existsSync(path.join(__dirname, '../lib/session_fsm.js')), 'Session FSM module must exist');
+  assert.ok(serverContent.includes('/api/v1/agent/sessions/:id/fsm'), 'Session FSM endpoint must exist');
+  assert.ok(serverContent.includes('SESSION_STATES'), 'SESSION_STATES must be imported in server.js');
+
+  const { SESSION_STATES, calculateCosineSimilarity } = require('../lib/session_fsm');
+  assert.strictEqual(SESSION_STATES.IDLE, 'IDLE');
+  assert.strictEqual(SESSION_STATES.EXECUTING_ACTION, 'EXECUTING_ACTION');
+  const sim = calculateCosineSimilarity([1, 0, 0], [1, 0, 0]);
+  assert.strictEqual(sim, 1);
+});

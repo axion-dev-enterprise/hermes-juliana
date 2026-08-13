@@ -1,0 +1,6 @@
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS state VARCHAR(30) DEFAULT 'IDLE';
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS active_dag_json JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE chat_sessions ADD COLUMN IF NOT EXISTS fsm_updated_at TIMESTAMP DEFAULT NOW();
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS is_summarized BOOLEAN DEFAULT false;
+ALTER TABLE chat_messages ADD COLUMN IF NOT EXISTS embedding_json JSONB;
+ALTER TABLE user_memories ADD COLUMN IF NOT EXISTS embedding_json JSONB;
