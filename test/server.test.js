@@ -84,6 +84,14 @@ test('Hermes Juliana - Durable task and correlated logging contracts', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '../.github/workflows/production-monitor.yml')));
 });
 
+test('Hermes Juliana - operational requests cannot finish as promises without receipts', () => {
+  const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  assert.ok(serverContent.includes('isOperationalActionRequest'));
+  assert.ok(serverContent.includes('[ACTION COMPLETION GUARD]'));
+  assert.ok(serverContent.includes('Tarefa não iniciada'));
+  assert.ok(serverContent.includes('executedToolLogs.length === 0'));
+});
+
 test('Hermes Juliana - production hardening contracts', () => {
   const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
   const autonomyContent = fs.readFileSync(path.join(__dirname, '../lib/autonomy_engine.js'), 'utf8');

@@ -196,6 +196,14 @@ function sanitizeFalsePositiveClaims(replyText, executedToolLogs = []) {
   return replyText;
 }
 
+function isOperationalActionRequest(text) {
+  return /\b(crie|criar|faça|fazer|execute|executar|configure|configurar|publique|publicar|deploy|implante|implantar|instale|instalar|atualize|atualizar|remova|remover|envie|enviar|suba|provisione|provisionar)\b/i.test(String(text || ''));
+}
+
+function isUnfinishedCommitment(text) {
+  return /\b(vou|irei|farei|começarei|iniciarei|primeiro vou|em seguida vou)\b/i.test(String(text || ''));
+}
+
 // SECURITY GUARDRAIL: Automatically mask unmasked API keys / tokens in chat outputs to prevent credentials leakage
 function sanitizeSensitiveTokens(text) {
   if (!text || typeof text !== 'string') return text;
@@ -2160,6 +2168,22 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
       autonomyAuthorized ? TOOL_DEFINITIONS : []
     );
 
+    if (isOperationalActionRequest(fullPromptMessage) && !(Array.isArray(message?.tool_calls) && message.tool_calls.length)) {
+      const rejectedDraft = typeof message?.content === 'string' ? message.content.trim() : '';
+      console.warn('[ACTION COMPLETION GUARD] Modelo respondeu sem ferramenta a uma solicitação operacional. Forçando nova decisão.');
+      messages.push({ role: 'assistant', content: rejectedDraft || 'Não iniciei nenhuma execução.' });
+      messages.push({
+        role: 'user',
+        content: `CORREÇÃO OBRIGATÓRIA DO RUNTIME: a resposta anterior não executou a tarefa. Invoque agora a ferramenta real apropriada. Se nenhuma ferramenta disponível puder concluir e verificar integralmente a solicitação, não prometa execução: responda explicitamente que nenhuma ação foi iniciada e identifique a capacidade ou credencial ausente.`
+      });
+      message = await callLLMWithTools(
+        modelName,
+        messages,
+        responseTokenBudget,
+        autonomyAuthorized ? TOOL_DEFINITIONS : []
+      );
+    }
+
     for (let turn = 0; turn < 5 && Array.isArray(message?.tool_calls) && message.tool_calls.length; turn += 1) {
       if (Date.now() - startTime > 35000) {
         console.warn('[TOOL LOOP TIMEOUT PREVENT] Limite de 35s atingido. Retornando logs de ferramentas executadas.');
@@ -2258,6 +2282,12 @@ Regras obrigatórias:
 
     if (message && typeof message.content === 'string' && message.content.trim().length > 0) {
       const draft = message.content.trim();
+      if (isOperationalActionRequest(fullPromptMessage) && executedToolLogs.length === 0) {
+        const detail = isUnfinishedCommitment(draft)
+          ? 'O modelo tentou responder com uma promessa futura sem iniciar a execução.'
+          : 'Nenhuma ferramenta produziu recibo factual para esta solicitação.';
+        return `## Tarefa não iniciada\n\n${detail}\n\nNão há conclusão, deploy ou URL verificada para reportar. Reformule a solicitação usando uma operação disponível ou configure a credencial/capacidade necessária no Vault.`;
+      }
       if (modelName === MIMO_PRIMARY_MODEL) return draft;
 
       const editorialPrompt = `Reescreva o rascunho abaixo como resposta final da JULIANA em português brasileiro.
