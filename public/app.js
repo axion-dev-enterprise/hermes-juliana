@@ -1469,8 +1469,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let html = escapeHtml(text);
 
     // Headings
-    html = html.replace(/### (.*?)\n/g, '<h3 style="margin: 12px 0 6px 0; color: var(--accent-primary); font-size: 15px; font-weight: 700;">$1</h3>');
-    html = html.replace(/## (.*?)\n/g, '<h2 style="margin: 14px 0 8px 0; color: var(--text-main); font-size: 16px; font-weight: 700;">$1</h2>');
+    html = html.replace(/^### (.+)$/gm, '<h3 style="margin: 12px 0 6px 0; color: var(--accent-primary); font-size: 15px; font-weight: 700;">$1</h3>');
+    html = html.replace(/^## (.+)$/gm, '<h2 style="margin: 14px 0 8px 0; color: var(--text-main); font-size: 16px; font-weight: 700;">$1</h2>');
+    html = html.replace(/^# (.+)$/gm, '<h1 style="margin: 16px 0 10px 0; color: var(--text-main); font-size: 18px; font-weight: 750;">$1</h1>');
 
     // Bold & Italic
     html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
@@ -1478,6 +1479,19 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Inline Code
     html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(99,102,241,0.15); color: var(--accent-primary); padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 12px;">$1</code>');
+
+    // HTTPS links only (content is already HTML-escaped above)
+    html = html.replace(/\[([^\]]+)\]\((https:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" style="color: var(--accent-primary); text-decoration: underline;">$1</a>');
+
+    // Unordered and ordered lists
+    html = html.replace(/(?:^|\n)((?:[-*] .+(?:\n|$))+)/g, (match, block) => {
+      const items = block.trim().split('\n').map(line => `<li>${line.replace(/^[-*]\s+/, '')}</li>`).join('');
+      return `\n<ul style="margin: 8px 0 8px 20px; padding: 0;">${items}</ul>\n`;
+    });
+    html = html.replace(/(?:^|\n)((?:\d+\. .+(?:\n|$))+)/g, (match, block) => {
+      const items = block.trim().split('\n').map(line => `<li>${line.replace(/^\d+\.\s+/, '')}</li>`).join('');
+      return `\n<ol style="margin: 8px 0 8px 20px; padding: 0;">${items}</ol>\n`;
+    });
 
     // Newlines to <br>
     html = html.replace(/\n/g, '<br>');

@@ -1998,6 +1998,8 @@ Regras obrigatórias:
 - Responda de forma humana, executiva, clara e completa.
 - Comece pela resposta objetiva à solicitação original.
 - Converta os resultados técnicos em texto e listas legíveis.
+- Use somente títulos Markdown ##/###, listas com hífen, negrito e links HTTPS.
+- Não use tabelas Markdown nem título H1 com apenas um #.
 - Não exponha JSON bruto, nomes internos de tools ou credenciais.
 - Não invente links, projetos, IDs ou resultados ausentes.
 - Se uma busca retornou lista vazia, explique explicitamente que nenhum item foi encontrado.
