@@ -6,6 +6,9 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeSessionId = localStorage.getItem('hermes_active_session') || 'session-1';
   let isThinking = false;
   let ws = null;
+  let wsReconnectTimer = null;
+  let wsHeartbeatTimer = null;
+  let wsReconnectAttempt = 0;
 
   // INITIALIZE ALL REAL MODULES
   initLogin();
@@ -255,9 +258,18 @@ document.addEventListener('DOMContentLoaded', () => {
     const wsStatusLabel = document.getElementById('ws-status-text');
 
     try {
+      if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
         console.log('[WebSocket] Connected to Hermes Gateway /ws');
+        wsReconnectAttempt = 0;
+        clearTimeout(wsReconnectTimer);
+        clearInterval(wsHeartbeatTimer);
+        wsHeartbeatTimer = setInterval(() => {
+          if (ws?.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: 'ping', timestamp: new Date().toISOString() }));
+          }
+        }, 25000);
         if (wsStatusLabel) wsStatusLabel.textContent = 'WebSocket Ativo';
       };
       ws.onmessage = (event) => {
@@ -274,8 +286,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
       };
       ws.onclose = () => {
+        clearInterval(wsHeartbeatTimer);
         if (wsStatusLabel) wsStatusLabel.textContent = 'WebSocket Reconectando...';
-        setTimeout(initWebSocket, 5000);
+        const reconnectDelay = Math.min(1000 * (2 ** wsReconnectAttempt), 15000);
+        wsReconnectAttempt += 1;
+        clearTimeout(wsReconnectTimer);
+        wsReconnectTimer = setTimeout(initWebSocket, reconnectDelay);
       };
       ws.onerror = (err) => {
         console.error('[WebSocket Error]', err);
@@ -522,7 +538,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentAttachments = [...pendingAttachments];
     pendingAttachments = [];
 
-    const isRetry = arguments[1] === true;
+    const requestId = globalThis.crypto?.randomUUID?.() || `chat-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     try {
       const response = await fetch('/api/v1/agent/chat', {
         method: 'POST',
@@ -531,7 +547,8 @@ document.addEventListener('DOMContentLoaded', () => {
           message: text,
           sessionId: activeSessionId,
           mode: 'EXECUTIVE',
-          attachments: currentAttachments
+          attachments: currentAttachments,
+          requestId
         })
       });
 
@@ -552,13 +569,9 @@ document.addEventListener('DOMContentLoaded', () => {
           friendlyMsg = `🛡️ **Auto-Fix de Processamento**: Detectada oscilação (HTTP ${statusCode}). O motor de Auto-Fix foi ativado.`;
         }
 
-        if ((statusCode === 524 || statusCode === 502 || statusCode === 503 || statusCode === 500) && !isRetry) {
-          console.log('[FRONTEND AUTO-RETRY] Disparando auto-retry transparente em 2.5 segundos...');
-          appendAgentMessage(`${friendlyMsg}\n\n🔄 *Auto-Retry ativado automaticamente para garantir a execução...*`, 'system/auto-fix', true);
-          setTimeout(() => {
-            sendUserChatMessage(text, true);
-          }, 2500);
-          return;
+        if (statusCode === 524 || statusCode === 502 || statusCode === 503 || statusCode === 500) {
+          if (!ws || ws.readyState !== WebSocket.OPEN) initWebSocket();
+          friendlyMsg = `### Solicitação preservada\n\nO gateway não confirmou a conclusão desta execução.\n\n- **Execução:** não confirmada; nenhum resultado foi presumido.\n- **Conexão:** recuperação do canal em andamento.\n- **Próximo passo:** reenvie a solicitação para uma nova tentativa segura.\n\nReferência: \`${requestId}\``;
         }
 
         throw new Error(friendlyMsg);

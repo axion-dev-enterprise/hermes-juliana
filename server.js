@@ -1542,6 +1542,74 @@ async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
   return msgObj.content || '';
 }
 
+function resilientAgentChat(handler) {
+  return (req, res, next) => {
+    Promise.resolve(handler(req, res, next)).catch(async (error) => {
+      const cleanSessionId = String(req.body?.sessionId || 'session-default').trim();
+      const requestId = String(req.body?.requestId || `recovery-${Date.now()}`).slice(0, 100);
+      const recoveryMessage = [
+        '### Solicitação preservada',
+        '',
+        'O gateway encontrou uma falha interna antes de concluir esta execução.',
+        '',
+        '- **Execução:** não confirmada; nenhum resultado foi presumido.',
+        '- **Estado:** a solicitação foi mantida no histórico.',
+        '- **Próximo passo:** reenvie a solicitação para uma nova tentativa segura.',
+        '',
+        `Referência: \`${requestId}\``
+      ].join('\n');
+
+      console.error('[AGENT CHAT RECOVERY]', { requestId, sessionId: cleanSessionId, error: error.message });
+
+      try {
+        await pool.query(`
+          INSERT INTO chat_sessions (id, title, folder, created_at, updated_at)
+          VALUES ($1, $2, 'Geral', NOW(), NOW())
+          ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
+        `, [cleanSessionId, String(req.body?.message || 'Solicitação preservada').substring(0, 45)]);
+        await pool.query(`
+          INSERT INTO chat_messages (session_id, sender, content, agent_name, created_at)
+          SELECT $1, 'user', $2, 'Juliana', NOW()
+          WHERE NOT EXISTS (
+            SELECT 1 FROM chat_messages
+            WHERE session_id = $1 AND sender = 'user' AND content = $2
+              AND created_at > NOW() - INTERVAL '5 minutes'
+          )
+        `, [cleanSessionId, String(req.body?.message || 'Solicitação sem conteúdo')]);
+        await pool.query(`
+          INSERT INTO chat_messages (session_id, sender, content, agent_name, model_used, created_at)
+          VALUES ($1, 'agent', $2, 'Hermes Central Juliana', 'system/recovery', NOW())
+        `, [cleanSessionId, recoveryMessage]);
+      } catch (dbError) {
+        console.error('[AGENT CHAT RECOVERY DB ERROR]', { requestId, error: dbError.message });
+      }
+
+      broadcastWs({
+        type: 'agent_chat_response',
+        sessionId: cleanSessionId,
+        requestId,
+        message: recoveryMessage,
+        model: 'system/recovery',
+        fallback: true,
+        status: 'degraded'
+      });
+
+      if (!res.headersSent) {
+        return res.status(200).json({
+          status: 'degraded',
+          retryable: true,
+          requestId,
+          model: 'system/recovery',
+          fallback: true,
+          message: recoveryMessage
+        });
+      }
+
+      return next(error);
+    });
+  };
+}
+
 function normalizeTextToolCalls(message, tools, modelName) {
   if (!message || typeof message.content !== 'string') return message;
   const content = message.content.trim();
@@ -1844,7 +1912,7 @@ async function executeExecutiveActionMandate(message) {
 }
 
 // AGENT CHAT ROUTE (NOUS PORTAL INFRASTRUCTURE & FULL AUTONOMY + CONTEXT MEMORY)
-app.post('/api/v1/agent/chat', async (req, res) => {
+app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
   const startTime = Date.now();
   const { message, mode = 'EXECUTIVE', sessionId, attachments } = req.body;
   if (!message) {
@@ -2212,7 +2280,7 @@ Sua missão é atuar como o modelo especialista de Auto-Fix de alta velocidade. 
     complexity: routing.complexity,
     message: responseText
   });
-});
+}));
 
 // ANALYTICS REST ENDPOINT (Issue #23)
 app.get('/api/v1/analytics/metrics', async (req, res) => {

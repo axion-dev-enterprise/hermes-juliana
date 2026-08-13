@@ -48,4 +48,13 @@ test('Hermes Juliana V5.0 - Server Engine & API Endpoints Verification', () => {
   assert.ok(serverContent.includes('/api/v1/agent/actions/confirm'), 'Executive Action confirmation API endpoint must exist');
   assert.ok(serverContent.includes('loginRateLimiter'), 'Login rate limiter middleware must exist');
   assert.ok(serverContent.includes('compressSessionContext'), 'Sliding window context compressor must exist');
+  assert.ok(serverContent.includes('resilientAgentChat'), 'Agent chat must have an async recovery boundary');
+  assert.ok(serverContent.includes("status: 'degraded'"), 'Recovery boundary must return an explicit degraded response');
+});
+
+test('Hermes Juliana - Chat transport never retries through an undefined function', () => {
+  const jsContent = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  assert.ok(!jsContent.includes('sendUserChatMessage('), 'Undefined chat retry function must not be called');
+  assert.ok(jsContent.includes('Solicitação preservada'), 'HTTP failures must render a useful recovery response');
+  assert.ok(jsContent.includes("type: 'ping'"), 'WebSocket heartbeat must be enabled');
 });
