@@ -1542,6 +1542,65 @@ async function callLLM(modelName, systemPrompt, userMessage, maxTokens) {
   return msgObj.content || '';
 }
 
+function normalizeTextToolCalls(message, tools, modelName) {
+  if (!message || typeof message.content !== 'string') return message;
+  const content = message.content.trim();
+  if (!/<tool_call\b|<arg_key>|<arg_value>/i.test(content)) return message;
+
+  const allowedTools = new Set(
+    (Array.isArray(tools) ? tools : [])
+      .map(tool => tool?.function?.name)
+      .filter(Boolean)
+  );
+  if (allowedTools.size === 0) {
+    throw new Error(`Modelo ${modelName} retornou marcação de ferramenta em uma chamada sem tools.`);
+  }
+
+  const parsedCalls = [];
+  const blocks = [...content.matchAll(/<tool_call>([\s\S]*?)<\/tool_call>/gi)];
+  for (const [index, blockMatch] of blocks.entries()) {
+    const block = blockMatch[1].trim();
+    let toolName = '';
+    let args = {};
+
+    const jsonMatch = block.match(/^\s*\{[\s\S]*\}\s*$/);
+    if (jsonMatch) {
+      try {
+        const parsed = JSON.parse(jsonMatch[0]);
+        toolName = parsed.name || parsed.function?.name || '';
+        args = parsed.arguments || parsed.function?.arguments || {};
+        if (typeof args === 'string') args = JSON.parse(args || '{}');
+      } catch (_) {}
+    }
+
+    if (!toolName) {
+      const nameMatch = block.match(/^\s*([A-Z][A-Z0-9_]+)\b/);
+      toolName = nameMatch?.[1] || '';
+      const argPattern = /<arg_key>([\s\S]*?)<\/arg_key>\s*<arg_value>([\s\S]*?)<\/arg_value>/gi;
+      for (const argMatch of block.matchAll(argPattern)) {
+        const key = argMatch[1].trim();
+        const value = argMatch[2].trim();
+        if (key) args[key] = value;
+      }
+    }
+
+    if (!allowedTools.has(toolName)) {
+      throw new Error(`Modelo ${modelName} tentou emitir ferramenta textual não autorizada: ${toolName || 'desconhecida'}.`);
+    }
+    parsedCalls.push({
+      id: `text_tool_${Date.now()}_${index}`,
+      type: 'function',
+      function: { name: toolName, arguments: JSON.stringify(args) }
+    });
+  }
+
+  if (parsedCalls.length === 0) {
+    throw new Error(`Modelo ${modelName} retornou marcação de ferramenta inválida.`);
+  }
+
+  return { ...message, content: null, tool_calls: parsedCalls };
+}
+
 async function callLLMWithTools(modelName, messages, maxTokens, tools) {
   const { nousKey, openrouterKey } = await getLLMCredentials();
 
@@ -1576,10 +1635,11 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
       msg.content = msg.reasoning_content;
     }
 
-    const hasContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
-    const hasTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+    const normalizedMsg = normalizeTextToolCalls(msg, tools, model);
+    const hasContent = typeof normalizedMsg.content === 'string' && normalizedMsg.content.trim().length > 0;
+    const hasTools = Array.isArray(normalizedMsg.tool_calls) && normalizedMsg.tool_calls.length > 0;
     if (!hasContent && !hasTools) throw new Error(`Modelo OpenRouter ${model} retornou conteúdo vazio (content e reasoning_content nulos).`);
-    return msg;
+    return normalizedMsg;
   };
 
   const tryNous = async (model, withTools = true) => {
@@ -1606,10 +1666,11 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
     const data = await response.json();
     const msg = data.choices?.[0]?.message;
     if (!msg) throw new Error(`Modelo Nous ${model} retornou choices vazio.`);
-    const hasContent = typeof msg.content === 'string' && msg.content.trim().length > 0;
-    const hasTools = Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0;
+    const normalizedMsg = normalizeTextToolCalls(msg, tools, model);
+    const hasContent = typeof normalizedMsg.content === 'string' && normalizedMsg.content.trim().length > 0;
+    const hasTools = Array.isArray(normalizedMsg.tool_calls) && normalizedMsg.tool_calls.length > 0;
     if (!hasContent && !hasTools) throw new Error(`Modelo Nous ${model} retornou conteúdo vazio.`);
-    return msg;
+    return normalizedMsg;
   };
 
   // 1. Tentar o Modelo Primário Solicitado (MiMo V2 ou Especialista Modal)
@@ -1634,12 +1695,6 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
       return msg;
     } catch (nErr) {
       console.warn(`[LLM NOUS WARN] ${model} falhou: ${nErr.message}`);
-      if (tools && tools.length) {
-        try {
-          const msgNoTools = await tryNous(model, false);
-          return msgNoTools;
-        } catch (_) {}
-      }
     }
   }
 
@@ -1653,12 +1708,6 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
         return msg;
       } catch (orErr) {
         console.warn(`[LLM OPENROUTER WARN] ${fbModel} falhou: ${orErr.message}`);
-        if (tools && tools.length) {
-          try {
-            const msgNoTools = await tryOpenRouter(fbModel, false);
-            return msgNoTools;
-          } catch (_) {}
-        }
       }
     }
   }
@@ -2031,7 +2080,7 @@ Regras obrigatórias:
 - Quando o usuário pedir um link, apresente somente URLs efetivamente retornadas pelas ferramentas.`;
 
       try {
-        const synthesis = await callLLMWithTools(modelName, [
+        const synthesis = await callLLMWithTools(MIMO_PRIMARY_MODEL, [
           { role: 'system', content: fullSystemPrompt },
           { role: 'user', content: synthesisPrompt }
         ], responseTokenBudget, []);
@@ -2047,7 +2096,31 @@ Regras obrigatórias:
     }
 
     if (message && typeof message.content === 'string' && message.content.trim().length > 0) {
-      return message.content.trim();
+      const draft = message.content.trim();
+      if (modelName === MIMO_PRIMARY_MODEL) return draft;
+
+      const editorialPrompt = `Reescreva o rascunho abaixo como resposta final da JULIANA em português brasileiro.
+
+Solicitação original:
+${fullPromptMessage}
+
+Rascunho do modelo especialista:
+${draft}
+
+Regras obrigatórias:
+- Preserve fatos, caminhos e URLs presentes no rascunho; não invente resultados.
+- Responda com clareza, contexto suficiente e próximo passo quando aplicável.
+- Use títulos ##/###, listas com hífen, negrito e links HTTPS quando ajudarem.
+- Não use XML, tags de tool call, JSON bruto, tabelas Markdown ou nomes internos de ferramentas.
+- Não afirme que executou uma ação sem resultado factual de ferramenta.`;
+      const editorial = await callLLMWithTools(MIMO_PRIMARY_MODEL, [
+        { role: 'system', content: fullSystemPrompt },
+        { role: 'user', content: editorialPrompt }
+      ], responseTokenBudget, []);
+      if (editorial?.content && editorial.content.trim().length > 0) {
+        return editorial.content.trim();
+      }
+      throw new Error(`Modelo editorial retornou resposta vazia para o rascunho de ${modelName}.`);
     }
 
     throw new Error(`Modelo ${modelName} retornou resposta vazia ou nula.`);
