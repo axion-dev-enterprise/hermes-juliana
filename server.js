@@ -24,6 +24,9 @@ const pool = new Pool({
 const TEST_AUTONOMY_ENABLED = process.env.HERMES_TEST_MODE === 'true';
 if (process.env.NODE_ENV === 'production' && TEST_AUTONOMY_ENABLED) throw new Error('HERMES_TEST_MODE=true is forbidden in production.');
 const OPERATOR_TOKEN = process.env.HERMES_OPERATOR_TOKEN || '';
+if (process.env.NODE_ENV === 'production' && Buffer.byteLength(OPERATOR_TOKEN, 'utf8') < 32) {
+  throw new Error('HERMES_OPERATOR_TOKEN must contain at least 32 bytes in production.');
+}
 const revokedSessions = new Set();
 const LOG_DIR = process.env.HERMES_LOG_DIR || '/app/HISTORY/audit/logs';
 const runtimeMetrics = { requests: 0, errors5xx: 0, latencyTotalMs: 0, wsConnections: 0, wsDisconnects: 0 };
@@ -58,9 +61,12 @@ function requireAutonomyAuthorization(req, res, next) {
   return req.auth?.role === 'admin' ? next() : res.status(403).json({ error: 'Permissão administrativa obrigatória.' });
 }
 
-// AUTO-CREATE V5.0 DATABASE TABLES
+// Database schema is managed exclusively by versioned migrations.
 async function initDatabaseTables() {
   try {
+    const migration = await pool.query(`SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1`);
+    if (!migration.rows[0]) throw new Error('No database migration has been applied.');
+    /* Legacy schema retained below only as migration source; it is never executed.
     await pool.query(`
       CREATE TABLE IF NOT EXISTS user_memories (
         id SERIAL PRIMARY KEY,
@@ -153,7 +159,7 @@ async function initDatabaseTables() {
       CREATE INDEX IF NOT EXISTS idx_agent_task_events_request ON agent_task_events(request_id, id);
       ALTER TABLE chat_sessions ALTER COLUMN id TYPE VARCHAR(100);
       ALTER TABLE chat_messages ALTER COLUMN session_id TYPE VARCHAR(100);
-    `);
+    `); */
 
     // Sync OpenRouter Vault Key para JULIANA
     try {
@@ -175,9 +181,10 @@ async function initDatabaseTables() {
       console.warn('[VAULT DB SYNC WARN]:', vErr.message);
     }
 
-    console.log('[DB INIT] Database, Sessions, Vault and CRM intelligence tables ready.');
+    console.log(`[DB INIT] Schema migration ${migration.rows[0].version} verified.`);
   } catch (err) {
-    console.warn('[DB INIT WARN]:', err.message);
+    console.error('[DB INIT FAILED]:', err.message);
+    if (process.env.NODE_ENV === 'production') process.exit(1);
   }
 }
 initDatabaseTables();
@@ -1932,8 +1939,7 @@ async function executeExecutiveActionMandate(message) {
   // REAL DOCKER PS / TERMINAL EXECUTION MANDATE INTERCEPTOR
   if (msgLower.includes('docker ps') || msgLower.includes('docker compose ps') || msgLower.includes('quais containers') || msgLower.includes('status dos containers')) {
     try {
-      const { execSync } = require('child_process');
-      const dockerOutput = execSync('docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Status}}\t{{.Ports}}"', { timeout: 10000, encoding: 'utf8' });
+      const dockerOutput = await require('./lib/tool_worker').runCommand('docker ps --format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"', 10000);
       actionsTaken.push(`✅ [SAÍDA REAL DOCKER PS NA VPS]:\n\`\`\`\n${dockerOutput.trim()}\n\`\`\``);
     } catch (err) {
       actionsTaken.push(`⚠️ [FALHA NA EXECUÇÃO DOCKER PS]: ${err.message}`);

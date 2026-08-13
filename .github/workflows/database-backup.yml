@@ -1,0 +1,54 @@
+name: Hermes PostgreSQL encrypted backup
+
+on:
+  schedule:
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup-and-restore-drill:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Create encrypted backup and isolated restore drill
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          BACKUP_KEY: ${{ secrets.HERMES_OPERATOR_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_SSH_PASSWORD }}
+          envs: BACKUP_KEY
+          script_stop: true
+          script: |
+            set -eu
+            stamp=$(date -u +%Y%m%dT%H%M%SZ)
+            mkdir -p /opt/hermes/backups
+            cd /opt/hermes
+            postgres_id=$(docker compose ps -q postgres)
+            test -n "$postgres_id"
+            docker exec "$postgres_id" sh -lc 'pg_dump -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Fc' > "/opt/hermes/backups/hermes-$stamp.dump"
+            docker cp "/opt/hermes/backups/hermes-$stamp.dump" "$postgres_id:/tmp/hermes-restore.dump"
+            docker exec "$postgres_id" sh -lc 'dropdb -U "$POSTGRES_USER" --if-exists hermes_restore_drill && createdb -U "$POSTGRES_USER" hermes_restore_drill && pg_restore -U "$POSTGRES_USER" -d hermes_restore_drill --exit-on-error /tmp/hermes-restore.dump'
+            docker exec "$postgres_id" sh -lc 'psql -U "$POSTGRES_USER" -d hermes_restore_drill -Atc "select count(*) from chat_sessions; select count(*) from chat_messages; select count(*) from api_vault; select count(*) from executive_action_receipts;"' > "/opt/hermes/backups/hermes-$stamp.restore-check"
+            openssl enc -aes-256-cbc -pbkdf2 -salt -in "/opt/hermes/backups/hermes-$stamp.dump" -out "/opt/hermes/backups/hermes-$stamp.dump.enc" -pass env:BACKUP_KEY
+            sha256sum "/opt/hermes/backups/hermes-$stamp.dump.enc" > "/opt/hermes/backups/hermes-$stamp.sha256"
+            rm -f "/opt/hermes/backups/hermes-$stamp.dump"
+            find /opt/hermes/backups -type f -mtime +30 -delete
+      - name: Download encrypted evidence off-host
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_SSH_PASSWORD }}
+          source: /opt/hermes/backups/*
+          target: backup-evidence
+          strip_components: 3
+      - uses: actions/upload-artifact@v4
+        with:
+          name: hermes-postgres-encrypted-backup-${{ github.run_id }}
+          path: backup-evidence
+          retention-days: 30

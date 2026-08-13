@@ -8,6 +8,7 @@
     "dev": "node --watch server.js",
     "test": "node --test test/server.test.js",
     "test:e2e": "node --test test/e2e_verification.test.js",
+    "migrate": "node scripts/migrate.js",
     "backup": "powershell -File ./scripts/backup.ps1"
   },
   "dependencies": {

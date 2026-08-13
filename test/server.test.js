@@ -83,3 +83,14 @@ test('Hermes Juliana - Durable task and correlated logging contracts', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '../docs/OBSERVABILITY_SLO.md')));
   assert.ok(fs.existsSync(path.join(__dirname, '../.github/workflows/production-monitor.yml')));
 });
+
+test('Hermes Juliana - production hardening contracts', () => {
+  const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  const autonomyContent = fs.readFileSync(path.join(__dirname, '../lib/autonomy_engine.js'), 'utf8');
+  assert.ok(serverContent.includes('schema_migrations'));
+  assert.ok(serverContent.includes('at least 32 bytes in production'));
+  assert.ok(!serverContent.includes("require('child_process').execSync"));
+  assert.ok(!autonomyContent.includes('execSync'));
+  assert.ok(fs.existsSync(path.join(__dirname, '../scripts/migrate.js')));
+  assert.ok(fs.existsSync(path.join(__dirname, '../migrations/001_runtime.sql')));
+});

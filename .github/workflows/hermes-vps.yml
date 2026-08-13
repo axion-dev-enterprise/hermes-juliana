@@ -1,4 +1,4 @@
-name: Hermes Juliana CI and VPS deploy
+name: Hermes Juliana immutable CI and VPS deploy
 
 on:
   pull_request:
@@ -8,75 +8,92 @@ on:
 
 permissions:
   contents: read
+  packages: write
 
 concurrency:
   group: hermes-juliana-production
   cancel-in-progress: false
 
+env:
+  REGISTRY: ghcr.io
+  GATEWAY_IMAGE: ghcr.io/axion-dev-enterprise/hermes-juliana-gateway
+  WEBCHAT_IMAGE: ghcr.io/axion-dev-enterprise/hermes-juliana-webchat
+
 jobs:
   validate:
-    name: Validate gateway
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
+        with: { node-version: 20, cache: npm }
       - run: npm ci
-      - run: node --check server.js
-      - run: node --check lib/autonomy_engine.js
+      - run: node --check server.js && node --check scripts/migrate.js && node --check lib/tool_worker.js
       - run: npm test
+      - name: Reject weak or committed credentials
+        shell: bash
+        run: |
+          ! git grep -nE '(axion123|gh[pousr]_[A-Za-z0-9]{20,}|sk-or-[A-Za-z0-9_-]{20,})' -- ':!package-lock.json'
 
-  deploy:
-    name: Deploy VPS
+  publish:
     needs: validate
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
-    environment: production
+    outputs:
+      gateway_digest: ${{ steps.gateway.outputs.digest }}
+      webchat_digest: ${{ steps.webchat.outputs.digest }}
     steps:
       - uses: actions/checkout@v4
-      - name: Package canonical service contexts
-        run: |
-          tar -czf hermes-gateway.tgz server.js package.json package-lock.json Dockerfile lib prompts docs
-          tar -czf hermes-webchat.tgz public Dockerfile.webchat nginx
-      - name: Upload gateway context
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_SSH_PASSWORD }}
-          source: hermes-gateway.tgz
-          target: /tmp
-      - name: Upload webchat context
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_SSH_PASSWORD }}
-          source: hermes-webchat.tgz
-          target: /tmp
-      - name: Rebuild services and validate health
+      - uses: docker/login-action@v3
+        with: { registry: ghcr.io, username: '${{ github.actor }}', password: '${{ secrets.GITHUB_TOKEN }}' }
+      - uses: docker/setup-buildx-action@v3
+      - id: gateway
+        uses: docker/build-push-action@v6
+        with: { context: ., push: true, tags: '${{ env.GATEWAY_IMAGE }}:${{ github.sha }}' }
+      - id: webchat
+        uses: docker/build-push-action@v6
+        with: { context: ., file: Dockerfile.webchat, push: true, tags: '${{ env.WEBCHAT_IMAGE }}:${{ github.sha }}' }
+      - uses: anchore/sbom-action@v0
+        with: { image: '${{ env.GATEWAY_IMAGE }}@${{ steps.gateway.outputs.digest }}', artifact-name: gateway-sbom.spdx.json }
+      - uses: aquasecurity/trivy-action@0.28.0
+        with: { image-ref: '${{ env.GATEWAY_IMAGE }}@${{ steps.gateway.outputs.digest }}', severity: 'CRITICAL', exit-code: '1' }
+
+  deploy:
+    needs: publish
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Promote immutable images with migration and rollback
         uses: appleboy/ssh-action@v1.2.0
+        env:
+          GATEWAY_REF: ${{ env.GATEWAY_IMAGE }}@${{ needs.publish.outputs.gateway_digest }}
+          WEBCHAT_REF: ${{ env.WEBCHAT_IMAGE }}@${{ needs.publish.outputs.webchat_digest }}
+          OPERATOR_TOKEN: ${{ secrets.HERMES_OPERATOR_TOKEN }}
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GHCR_USER: ${{ github.actor }}
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           password: ${{ secrets.VPS_SSH_PASSWORD }}
+          envs: GATEWAY_REF,WEBCHAT_REF,OPERATOR_TOKEN,GHCR_TOKEN,GHCR_USER
           script_stop: true
           script: |
             set -eu
-            mkdir -p /opt/hermes/services/hermes-gateway /opt/hermes/services/hermes-webchat
-            tar -xzf /tmp/hermes-gateway.tgz -C /opt/hermes/services/hermes-gateway
-            tar -xzf /tmp/hermes-webchat.tgz -C /opt/hermes/services/hermes-webchat
-            mv /opt/hermes/services/hermes-webchat/Dockerfile.webchat /opt/hermes/services/hermes-webchat/Dockerfile
-            printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-gateway/.dockerignore
-            printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-webchat/.dockerignore
-            grep -q '^HERMES_TEST_MODE=' /opt/hermes/.env && sed -i 's/^HERMES_TEST_MODE=.*/HERMES_TEST_MODE=false/' /opt/hermes/.env || printf '\nHERMES_TEST_MODE=false\n' >> /opt/hermes/.env
-            sed -i '/^HERMES_OPERATOR_TOKEN=/d' /opt/hermes/.env
-            printf '\nHERMES_OPERATOR_TOKEN=%s\n' '${{ secrets.HERMES_OPERATOR_TOKEN }}' >> /opt/hermes/.env
-            docker build -t hermes-gateway-juliana:v5.1.0 /opt/hermes/services/hermes-gateway
-            docker build -t hermes-webchat:v5.1.0 /opt/hermes/services/hermes-webchat
+            test "$(printf %s "$OPERATOR_TOKEN" | wc -c)" -ge 32
             cd /opt/hermes
-            docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat
-            sleep 10
-            docker exec hermes-gateway-juliana wget -qO- http://127.0.0.1:8000/healthz
+            printf %s "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
+            previous_gateway=$(docker image inspect hermes-gateway-juliana:v5.1.0 --format '{{.Id}}' 2>/dev/null || true)
+            previous_webchat=$(docker image inspect hermes-webchat:v5.1.0 --format '{{.Id}}' 2>/dev/null || true)
+            docker pull "$GATEWAY_REF"
+            docker pull "$WEBCHAT_REF"
+            docker run --rm --network hermes_hermes-network --env-file /opt/hermes/.env "$GATEWAY_REF" npm run migrate
+            sed -i '/^HERMES_OPERATOR_TOKEN=/d' /opt/hermes/.env
+            printf '\nHERMES_OPERATOR_TOKEN=%s\n' "$OPERATOR_TOKEN" >> /opt/hermes/.env
+            docker tag "$GATEWAY_REF" hermes-gateway-juliana:v5.1.0
+            docker tag "$WEBCHAT_REF" hermes-webchat:v5.1.0
+            if ! docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat || ! timeout 90 sh -c 'until docker exec hermes-gateway-juliana wget -qO- http://127.0.0.1:8000/healthz; do sleep 3; done'; then
+              test -n "$previous_gateway" && docker tag "$previous_gateway" hermes-gateway-juliana:v5.1.0
+              test -n "$previous_webchat" && docker tag "$previous_webchat" hermes-webchat:v5.1.0
+              docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat
+              exit 1
+            fi
+            printf '%s\n%s\n' "$GATEWAY_REF" "$WEBCHAT_REF" > /opt/hermes/DEPLOYED_DIGESTS
