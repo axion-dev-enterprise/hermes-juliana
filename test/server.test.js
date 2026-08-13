@@ -78,4 +78,8 @@ test('Hermes Juliana - Durable task and correlated logging contracts', () => {
   assert.ok(serverContent.includes("log('info', 'http_request'"));
   assert.ok(serverContent.includes("res.setHeader('X-Request-Id'"));
   assert.ok(serverContent.includes('[REDACTED]'));
+  assert.ok(serverContent.includes('/api/v1/observability/metrics'));
+  assert.ok(serverContent.includes('HERMES_LOG_DIR'));
+  assert.ok(fs.existsSync(path.join(__dirname, '../docs/OBSERVABILITY_SLO.md')));
+  assert.ok(fs.existsSync(path.join(__dirname, '../.github/workflows/production-monitor.yml')));
 });

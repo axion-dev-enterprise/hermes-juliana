@@ -17,6 +17,7 @@ services:
       - HERMES_OPERATOR_TOKEN=${HERMES_OPERATOR_TOKEN:-}
       - HERMES_TEST_MODE=${HERMES_TEST_MODE:-false}
       - HERMES_SKILLS_DIR=/app/runtime-skills
+      - HERMES_LOG_DIR=/app/HISTORY/audit/logs
     volumes:
       - ./docs:/app/docs
       - ./lib:/app/lib

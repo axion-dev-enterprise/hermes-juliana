@@ -1,0 +1,43 @@
+name: Hermes Juliana production monitor
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      simulate_failure:
+        description: Validate the alert channel without impacting production
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate public health body
+        id: health
+        continue-on-error: true
+        env:
+          SIMULATE_FAILURE: ${{ inputs.simulate_failure || 'false' }}
+        run: |
+          set -euo pipefail
+          test "$SIMULATE_FAILURE" != "true"
+          body="$(curl --fail --silent --show-error --location --max-time 15 https://juliana.axionenterprise.cloud/healthz)"
+          echo "$body" | jq -e '.status == "ok" and .system == "HERMES_CENTRAL_JULIANA" and .checks.postgres == "ok" and .checks.redis == "ok" and .checks.openrouter == "ok" and .checks.ws == "ok"'
+      - name: Open deduplicated operational alert
+        if: steps.health.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label healthcheck --search 'Production health monitor failure in:title' --json number --jq '.[0].number // empty')"
+          if [ -z "$existing" ]; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title 'Production health monitor failure' --label healthcheck --label high --body "Synthetic health validation failed. Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          else
+            gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "Failure repeated. Workflow: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+          exit 1

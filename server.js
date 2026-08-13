@@ -3,6 +3,7 @@ const http = require('http');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { AsyncLocalStorage } = require('async_hooks');
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { SYSTEM_PROMPT, MODES } = require('./prompts/juliana_system_prompt');
@@ -24,8 +25,15 @@ const TEST_AUTONOMY_ENABLED = process.env.HERMES_TEST_MODE === 'true';
 if (process.env.NODE_ENV === 'production' && TEST_AUTONOMY_ENABLED) throw new Error('HERMES_TEST_MODE=true is forbidden in production.');
 const OPERATOR_TOKEN = process.env.HERMES_OPERATOR_TOKEN || '';
 const revokedSessions = new Set();
+const LOG_DIR = process.env.HERMES_LOG_DIR || '/app/HISTORY/audit/logs';
+const runtimeMetrics = { requests: 0, errors5xx: 0, latencyTotalMs: 0, wsConnections: 0, wsDisconnects: 0 };
+const traceStorage = new AsyncLocalStorage();
 function redact(value) { return String(value ?? '').replace(/(Bearer\s+|sk-[a-z-]*|gh[pousr]_|vck_)[A-Za-z0-9_.-]+/gi, '$1[REDACTED]'); }
-function log(level, message, fields = {}) { process.stdout.write(JSON.stringify({ timestamp: new Date().toISOString(), level, service: 'hermes-juliana', message: redact(message), ...Object.fromEntries(Object.entries(fields).map(([k,v]) => [k, redact(v)])) }) + '\n'); }
+function log(level, message, fields = {}) {
+  const entry = JSON.stringify({ timestamp: new Date().toISOString(), level, service: 'hermes-juliana', message: redact(message), ...Object.fromEntries(Object.entries(fields).map(([k,v]) => [k, redact(v)])) }) + '\n';
+  process.stdout.write(entry);
+  try { fs.mkdirSync(LOG_DIR, { recursive: true }); fs.appendFileSync(path.join(LOG_DIR, `hermes-${new Date().toISOString().slice(0, 10)}.jsonl`), entry); } catch (_) { /* stdout remains canonical fallback */ }
+}
 console.log = (...args) => log('info', args.map(redact).join(' '));
 console.warn = (...args) => log('warn', args.map(redact).join(' '));
 console.error = (...args) => log('error', args.map(redact).join(' '));
@@ -285,11 +293,13 @@ function compressSessionContext(messages) {
 
 app.use(express.json());
 app.use((req, res, next) => {
-  req.traceId = String(req.headers['x-request-id'] || crypto.randomUUID()).slice(0, 100);
+  const traceparent = String(req.headers.traceparent || '');
+  req.traceId = String(req.headers['x-request-id'] || traceparent.split('-')[1] || crypto.randomUUID()).slice(0, 100);
   res.setHeader('X-Request-Id', req.traceId);
   const started = Date.now();
   res.on('finish', () => log('info', 'http_request', { trace_id: req.traceId, method: req.method, path: req.path, status: res.statusCode, duration_ms: Date.now() - started }));
-  next();
+  res.on('finish', () => { runtimeMetrics.requests += 1; runtimeMetrics.latencyTotalMs += Date.now() - started; if (res.statusCode >= 500) runtimeMetrics.errors5xx += 1; });
+  traceStorage.run({ traceId: req.traceId }, next);
 });
 app.use('/api/v1', (req, res, next) => {
   const publicPaths = new Set(['/auth/login', '/health', '/connectors/whatsapp/webhook']);
@@ -421,6 +431,7 @@ function appendWhatsAppHistory(sender, role, content) {
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
 wss.on('connection', (ws) => {
+  runtimeMetrics.wsConnections += 1;
   ws.authenticated = false;
   console.log('[WEBSOCKET] Client connected to Hermes Gateway /ws');
   
@@ -447,6 +458,7 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
+    runtimeMetrics.wsDisconnects += 1;
     console.log('[WEBSOCKET] Client disconnected');
   });
 });
@@ -1006,6 +1018,18 @@ app.get('/api/v1/agent/tasks/:requestId', async (req, res) => {
   const after = Math.max(0, Number(req.query.after) || 0);
   const events = await pool.query('SELECT id, event_type, payload, created_at FROM agent_task_events WHERE request_id = $1 AND id > $2 ORDER BY id ASC', [requestId, after]);
   return res.json({ status: 'success', task: task.rows[0], events: events.rows });
+});
+
+app.get('/api/v1/observability/metrics', async (req, res) => {
+  const states = await pool.query('SELECT state, COUNT(*)::int AS count FROM agent_tasks GROUP BY state');
+  return res.json({
+    status: 'success',
+    service: 'hermes-juliana',
+    uptime_seconds: Math.round((Date.now() - STARTED_AT) / 1000),
+    http: { ...runtimeMetrics, average_latency_ms: runtimeMetrics.requests ? Math.round(runtimeMetrics.latencyTotalMs / runtimeMetrics.requests) : 0 },
+    tasks: Object.fromEntries(states.rows.map(row => [row.state, row.count])),
+    websocket: { active: wss.clients.size }
+  });
 });
 
 app.post('/api/v1/agent/tasks/:requestId/cancel', async (req, res) => {
@@ -1752,6 +1776,8 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
       messages,
       ...(withTools && tools && tools.length ? { tools, tool_choice: 'auto' } : {})
     };
+    const spanStarted = Date.now();
+    log('info', 'llm_span_start', { trace_id: traceStorage.getStore()?.traceId || 'background', provider: 'openrouter', model });
     const response = await fetch(OPENROUTER_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -1762,6 +1788,7 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
       },
       body: JSON.stringify(payload)
     });
+    log(response.ok ? 'info' : 'error', 'llm_span_end', { trace_id: traceStorage.getStore()?.traceId || 'background', provider: 'openrouter', model, status: response.status, duration_ms: Date.now() - spanStarted });
     if (!response.ok) {
       const errText = await response.text();
       throw new Error(`OpenRouter HTTP ${response.status}: ${errText.substring(0, 120)}`);
@@ -1789,6 +1816,8 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
       messages,
       ...(withTools && tools && tools.length ? { tools, tool_choice: 'auto' } : {})
     };
+    const spanStarted = Date.now();
+    log('info', 'llm_span_start', { trace_id: traceStorage.getStore()?.traceId || 'background', provider: 'nous', model });
     const response = await fetch(NOUS_PORTAL_ENDPOINT, {
       method: 'POST',
       headers: {
@@ -1799,6 +1828,7 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
       },
       body: JSON.stringify(payload)
     });
+    log(response.ok ? 'info' : 'error', 'llm_span_end', { trace_id: traceStorage.getStore()?.traceId || 'background', provider: 'nous', model, status: response.status, duration_ms: Date.now() - spanStarted });
     if (!response.ok) {
       const errText = await response.text();
       throw new Error(`Nous HTTP ${response.status}: ${errText.substring(0, 120)}`);
