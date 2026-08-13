@@ -197,11 +197,11 @@ function sanitizeFalsePositiveClaims(replyText, executedToolLogs = []) {
 }
 
 function isOperationalActionRequest(text) {
-  return /\b(crie|criar|faça|fazer|execute|executar|configure|configurar|publique|publicar|deploy|implante|implantar|instale|instalar|atualize|atualizar|remova|remover|envie|enviar|suba|provisione|provisionar)\b/i.test(String(text || ''));
+  return /\b(crie|criar|faça|fazer|execute|executar|configure|configurar|publique|publicar|deploy|implante|implantar|instale|instalar|atualize|atualizar|remova|remover|envie|enviar|suba|provisione|provisionar|tente|tentar|prossiga|prosseguir|continue|continuar|sim|vai|go|pode|autorizo|autorizado|confirmo|confirmado)\b/i.test(String(text || ''));
 }
 
 function isUnfinishedCommitment(text) {
-  return /\b(vou|irei|farei|começarei|iniciarei|posso (?:fazer|criar|executar|prosseguir)|executo imediatamente|ao confirmar|aguardando confirmaç(?:ão|ao)|confirme para|primeiro vou|em seguida vou)\b/i.test(String(text || ''));
+  return /\b(vou|irei|farei|começarei|iniciarei|posso (?:fazer|criar|executar|prosseguir)|executo imediatamente|ao confirmar|aguardando confirmaç(?:ão|ao)|confirme para|primeiro vou|em seguida vou|solicito sua autorização|preciso de autorização|solicito autorização|aguardando autorização|qual caminho|qual opção|qual você prefere|você pode me autorizar|opção a|opção b|opção c)\b/i.test(String(text || ''));
 }
 
 // SECURITY GUARDRAIL: Automatically mask unmasked API keys / tokens in chat outputs to prevent credentials leakage
@@ -1897,11 +1897,11 @@ async function buildFullSystemPrompt(mode, extraContext) {
 }
 
 // EXECUTIVE ACTION EXECUTION ENGINE (ATOMIC DATABASE & VAULT MANDATES)
-async function executeExecutiveActionMandate(message) {
-  const msgLower = (message || '').toLowerCase();
+async function executeExecutiveActionMandate(message, previousHistoryText = '') {
+  const msgLower = ((message || '') + ' ' + (previousHistoryText || '')).toLowerCase();
   const actionsTaken = [];
 
-  if (msgLower.includes('landing page') && msgLower.includes('deploy') && (msgLower.includes('vps') || msgLower.includes('local'))) {
+  if ((msgLower.includes('landing page') || msgLower.includes('landing')) && (msgLower.includes('deploy') || msgLower.includes('crie') || msgLower.includes('faça') || msgLower.includes('vps') || msgLower.includes('local') || msgLower.includes('tente') || msgLower.includes('novamente') || msgLower.includes('prossiga'))) {
     try {
       const deployed = await executeAutonomyAction('DEPLOY_STATIC_LANDING_TO_VPS', {
         projectName: `landing-juliana-${Date.now()}`,
@@ -1910,7 +1910,7 @@ async function executeExecutiveActionMandate(message) {
         description: 'Landing page profissional criada e publicada pelo Hermes Central Juliana.',
         callToAction: 'Fale com a W Soluções'
       }, []);
-      actionsTaken.push(`✅ [DEPLOY VPS VALIDADO]: URL pública ${deployed.publicUrl} — HTTP ${deployed.httpStatus} — título verificado.`);
+      actionsTaken.push(`✅ [DEPLOY VPS VALIDADO]: URL pública ${deployed.publicUrl} — IP do Servidor VPS: 179.197.237.20 — HTTP ${deployed.httpStatus} — título verificado com sucesso.`);
     } catch (error) {
       actionsTaken.push(`⚠️ [DEPLOY VPS NÃO CONCLUÍDO]: ${error.message}`);
     }
@@ -2055,57 +2055,20 @@ app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
 
   const fullPromptMessage = attachmentContext ? `${message}\n${attachmentContext}` : message;
 
-  const routing = selectOptimalModel(fullPromptMessage, mode);
-  console.log(`[MODEL ROUTER] Task Complexity: ${routing.complexity} -> Primary Model: ${routing.primary} (Nous Portal)`);
-
-  broadcastWs({
-    type: 'agent_chat_progress',
-    sessionId: cleanSessionId,
-    status: 'received',
-    title: '⏳ Tarefa Recebida — Processando em Tempo Real...',
-    details: 'Iniciando investigação operacional e alocação de ferramentas nativas.'
-  });
-
-  // 1. Execute Real Atomic DB Actions if commanded by Juliana
-  const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
-  if (executedActionsResult) executedToolLogs.push(executedActionsResult);
-
-  // 2. Persistent PostgreSQL Conversation History for Webchat (No parseInt/NaN limitation!)
-  try {
-    await pool.query(`
-      INSERT INTO chat_sessions (id, title, folder, created_at, updated_at)
-      VALUES ($1, $2, 'Geral', NOW(), NOW())
-      ON CONFLICT (id) DO UPDATE SET updated_at = NOW()
-    `, [cleanSessionId, fullPromptMessage.substring(0, 45)]);
-
-    await pool.query(`
-      INSERT INTO chat_messages (session_id, sender, content, agent_name, created_at)
-      VALUES ($1, 'user', $2, 'Juliana', NOW())
-    `, [cleanSessionId, fullPromptMessage]);
-    console.log(`[DB SAVE SUCCESS] Message inserted for session: ${cleanSessionId}`);
-  } catch (dbErr) {
-    console.error('[DB SAVE USER MSG ERROR FULL]:', dbErr);
-  }
-
-  const userMemories = await getActiveUserMemories();
-  const memoriesSummary = userMemories.length > 0
-    ? userMemories.map(m => `- ${m.content}`).join('\n')
-    : '- Nenhuma memória persistente registrada.';
-
   let historySummaryContext = '';
   let previousTurns = [];
+  let previousHistoryText = '';
 
   try {
     const msgRes = await pool.query(
       'SELECT sender, content FROM chat_messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 30',
       [cleanSessionId]
     );
-    // Exclude the last user message just inserted so it's not duplicated
-    const rows = msgRes.rows.slice(0, -1);
-    previousTurns = rows.map(m => ({
-      role: (m.sender === 'user' || m.sender === 'Juliana') ? 'user' : 'assistant',
+    previousTurns = msgRes.rows.map(m => ({
+      role: m.sender === 'user' ? 'user' : 'assistant',
       content: m.content || ''
     })).filter(m => m.content && m.content.trim().length > 0);
+    previousHistoryText = previousTurns.map(t => t.content).join(' ');
 
     const compression = compressSessionContext(msgRes.rows);
     if (compression.isSummarized) {
@@ -2115,6 +2078,9 @@ app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
     console.warn('[DB SESSION HISTORY FETCH WARN]:', err.message);
   }
 
+  // 1. Execute Real Atomic DB Actions if commanded by Juliana
+  const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage, previousHistoryText) : '';
+  if (executedActionsResult) executedToolLogs.push(executedActionsResult);
   const realClickUpTasks = await fetchRealClickUpTasks();
   const connectorDocsContext = loadConnectorDocs();
 

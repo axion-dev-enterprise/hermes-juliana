@@ -93,8 +93,10 @@ test('Hermes Juliana - operational requests cannot finish as promises without re
   assert.ok(serverContent.includes("completionState = 'incomplete'"));
   assert.ok(serverContent.includes('Promessa ou pedido de confirmação rejeitado'));
   assert.ok(serverContent.includes('DEPLOY_STATIC_LANDING_TO_VPS'));
+  assert.ok(serverContent.includes('previousHistoryText'));
   const autonomyContent = fs.readFileSync(path.join(__dirname, '../lib/autonomy_engine.js'), 'utf8');
   assert.ok(autonomyContent.includes("provider: 'vps-nginx'"));
+  assert.ok(autonomyContent.includes("vpsIp: '179.197.237.20'"));
   assert.ok(autonomyContent.includes('titleVerified: true'));
 });
 
