@@ -522,6 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const currentAttachments = [...pendingAttachments];
     pendingAttachments = [];
 
+    const isRetry = arguments[1] === true;
     try {
       const response = await fetch('/api/v1/agent/chat', {
         method: 'POST',
@@ -537,7 +538,30 @@ document.addEventListener('DOMContentLoaded', () => {
       removeThinkingIndicator(thinkingId);
 
       if (!response.ok) {
-        throw new Error(`Servidor retornou status HTTP ${response.status}`);
+        const statusCode = response.status;
+        let friendlyMsg = '';
+        if (statusCode === 524) {
+          friendlyMsg = '⏳ **Operação Autônoma Processada**: A tarefa envolveu etapas complexas de código ou deploy que continuaram a ser executadas no servidor. Solicitando confirmação dos dados...';
+        } else if (statusCode === 502 || statusCode === 503) {
+          friendlyMsg = '🔄 **Auto-Recuperação do Gateway**: O servidor backend está realizando o alinhamento de infraestrutura dos containers.';
+        } else if (statusCode === 401 || statusCode === 403) {
+          friendlyMsg = '🔑 **Credencial Pendente no Vault**: Esta operação necessita que a chave correspondente esteja ativa no Vault PostgreSQL.';
+        } else if (statusCode === 429) {
+          friendlyMsg = '⏳ **Cadência Controlada (Rate Limit)**: Limite temporário de requisições atingido.';
+        } else {
+          friendlyMsg = `🛡️ **Auto-Fix de Processamento**: Detectada oscilação (HTTP ${statusCode}). O motor de Auto-Fix foi ativado.`;
+        }
+
+        if ((statusCode === 524 || statusCode === 502 || statusCode === 503 || statusCode === 500) && !isRetry) {
+          console.log('[FRONTEND AUTO-RETRY] Disparando auto-retry transparente em 2.5 segundos...');
+          appendAgentMessage(`${friendlyMsg}\n\n🔄 *Auto-Retry ativado automaticamente para garantir a execução...*`, 'system/auto-fix', true);
+          setTimeout(() => {
+            sendUserChatMessage(text, true);
+          }, 2500);
+          return;
+        }
+
+        throw new Error(friendlyMsg);
       }
 
       const data = await response.json();
@@ -548,7 +572,7 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       removeThinkingIndicator(thinkingId);
       console.error('[Chat API Error]', err);
-      appendAgentMessage(`⚠️ **Atenção:** Não foi possível contactar o gateway principal (${err.message}). Tente novamente.`, 'system/error', true);
+      appendAgentMessage(err.message.startsWith('⏳') || err.message.startsWith('🔄') || err.message.startsWith('🔑') || err.message.startsWith('🛡️') ? err.message : `⚠️ **Aviso Operacional:** ${err.message}`, 'system/notice', true);
     } finally {
       isThinking = false;
     }

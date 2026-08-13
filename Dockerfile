@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-RUN apk add --no-cache docker-cli python3 py3-pip
+RUN apk add --no-cache docker-cli python3 py3-pip curl wget bash git
 
 COPY package*.json ./
 RUN npm ci --omit=dev
