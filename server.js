@@ -2,6 +2,7 @@ const express = require('express');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { SYSTEM_PROMPT, MODES } = require('./prompts/juliana_system_prompt');
@@ -20,6 +21,17 @@ const pool = new Pool({
 });
 
 const TEST_AUTONOMY_ENABLED = process.env.HERMES_TEST_MODE === 'true';
+if (process.env.NODE_ENV === 'production' && TEST_AUTONOMY_ENABLED) throw new Error('HERMES_TEST_MODE=true is forbidden in production.');
+const OPERATOR_TOKEN = process.env.HERMES_OPERATOR_TOKEN || '';
+const revokedSessions = new Set();
+function redact(value) { return String(value ?? '').replace(/(Bearer\s+|sk-[a-z-]*|gh[pousr]_|vck_)[A-Za-z0-9_.-]+/gi, '$1[REDACTED]'); }
+function log(level, message, fields = {}) { process.stdout.write(JSON.stringify({ timestamp: new Date().toISOString(), level, service: 'hermes-juliana', message: redact(message), ...Object.fromEntries(Object.entries(fields).map(([k,v]) => [k, redact(v)])) }) + '\n'); }
+console.log = (...args) => log('info', args.map(redact).join(' '));
+console.warn = (...args) => log('warn', args.map(redact).join(' '));
+console.error = (...args) => log('error', args.map(redact).join(' '));
+function signSession(payload) { const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url'); const signature = crypto.createHmac('sha256', OPERATOR_TOKEN).update(encoded).digest('base64url'); return `${encoded}.${signature}`; }
+function verifySession(token) { if (!OPERATOR_TOKEN || !token || revokedSessions.has(token)) return null; const [encoded, signature] = String(token).split('.'); if (!encoded || !signature) return null; const expected = crypto.createHmac('sha256', OPERATOR_TOKEN).update(encoded).digest('base64url'); if (signature.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expected))) return null; const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')); return payload.exp > Date.now() ? payload : null; }
+function requireAuth(req, res, next) { const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, ''); try { req.auth = verifySession(token); } catch (_) { req.auth = null; } return req.auth ? next() : res.status(401).json({ error: 'Autenticação obrigatória.' }); }
 const HERMES_SKILLS_DIR = path.resolve(process.env.HERMES_SKILLS_DIR || path.join(__dirname, 'runtime-skills'));
 
 function safeSkillName(value) {
@@ -35,7 +47,7 @@ function skillFile(name) {
 
 function requireAutonomyAuthorization(req, res, next) {
   // AUTONOMIA INTEGRAL HABILITADA: Acesso direto e execução autônoma sem bloqueios administrativos
-  return next();
+  return req.auth?.role === 'admin' ? next() : res.status(403).json({ error: 'Permissão administrativa obrigatória.' });
 }
 
 // AUTO-CREATE V5.0 DATABASE TABLES
@@ -262,6 +274,17 @@ function compressSessionContext(messages) {
 }
 
 app.use(express.json());
+app.use((req, res, next) => {
+  req.traceId = String(req.headers['x-request-id'] || crypto.randomUUID()).slice(0, 100);
+  res.setHeader('X-Request-Id', req.traceId);
+  const started = Date.now();
+  res.on('finish', () => log('info', 'http_request', { trace_id: req.traceId, method: req.method, path: req.path, status: res.statusCode, duration_ms: Date.now() - started }));
+  next();
+});
+app.use('/api/v1', (req, res, next) => {
+  const publicPaths = new Set(['/auth/login', '/health', '/connectors/whatsapp/webhook']);
+  return publicPaths.has(req.path) ? next() : requireAuth(req, res, next);
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 app.get('/api/v1/skills', (req, res) => {
@@ -388,6 +411,7 @@ function appendWhatsAppHistory(sender, role, content) {
 const wss = new WebSocket.Server({ server, path: '/ws' });
 
 wss.on('connection', (ws) => {
+  ws.authenticated = false;
   console.log('[WEBSOCKET] Client connected to Hermes Gateway /ws');
   
   ws.send(JSON.stringify({
@@ -399,6 +423,11 @@ wss.on('connection', (ws) => {
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
+      if (data.type === 'auth') {
+        ws.authenticated = Boolean(verifySession(data.token));
+        return ws.send(JSON.stringify({ type: 'auth_status', authenticated: ws.authenticated }));
+      }
+      if (!ws.authenticated) return ws.close(1008, 'Authentication required');
       if (data.type === 'ping') {
         ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
       }
@@ -414,7 +443,7 @@ wss.on('connection', (ws) => {
 
 function broadcastWs(data) {
   wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN) {
+    if (client.readyState === WebSocket.OPEN && client.authenticated) {
       client.send(JSON.stringify(data));
     }
   });
@@ -562,16 +591,18 @@ app.post('/api/v1/auth/login', loginRateLimiter, (req, res) => {
     return res.status(400).json({ error: 'E-mail e senha são obrigatórios.' });
   }
 
-  if (!TEST_AUTONOMY_ENABLED && !process.env.HERMES_OPERATOR_TOKEN) {
+  if (!OPERATOR_TOKEN) {
     return res.status(503).json({ error: 'Login administrativo indisponível até configurar HERMES_OPERATOR_TOKEN.' });
   }
-  if (!TEST_AUTONOMY_ENABLED && password !== process.env.HERMES_OPERATOR_TOKEN) {
+  const supplied = Buffer.from(String(password));
+  const expected = Buffer.from(OPERATOR_TOKEN);
+  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
     return res.status(401).json({ error: 'Credenciais inválidas.' });
   }
 
   res.json({
     status: 'success',
-    token: `jwt-juliana-session-${Date.now()}`,
+    token: signSession({ sub: email, role: 'admin', exp: Date.now() + 86400000, sid: crypto.randomUUID() }),
     expiresIn: 86400,
     user: {
       name: 'Juliana',
@@ -902,7 +933,13 @@ app.post('/api/v1/agent/folders', async (req, res) => {
 // VAULT ENDPOINTS (100% REAL POSTGRESQL DB)
 app.get('/api/v1/vault/keys', async (req, res) => {
   const keys = await getRealVaultKeys();
-  res.json({ status: 'success', keys });
+  res.json({ status: 'success', keys: keys.map(({ rawToken, ...safe }) => safe) });
+});
+
+app.post('/api/v1/auth/logout', requireAuth, (req, res) => {
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  revokedSessions.add(token);
+  return res.json({ status: 'success' });
 });
 
 app.post('/api/v1/vault', async (req, res) => {
@@ -949,6 +986,24 @@ app.delete('/api/v1/vault/:service', async (req, res) => {
     console.error('[DB VAULT DELETE ERROR]:', err.message);
     return res.status(500).json({ error: 'Falha ao remover serviço do Vault.' });
   }
+});
+
+app.get('/api/v1/agent/tasks/:requestId', async (req, res) => {
+  const requestId = String(req.params.requestId || '').slice(0, 100);
+  await pool.query("UPDATE agent_tasks SET state = 'unknown', error = 'Heartbeat expirado; reconciliação necessária.', updated_at = NOW() WHERE request_id = $1 AND state = 'running' AND heartbeat_at < NOW() - INTERVAL '5 minutes'", [requestId]);
+  const task = await pool.query('SELECT request_id, session_id, state, response, model, error, heartbeat_at, created_at, updated_at FROM agent_tasks WHERE request_id = $1', [requestId]);
+  if (!task.rows[0]) return res.status(404).json({ error: 'Tarefa não encontrada.' });
+  const after = Math.max(0, Number(req.query.after) || 0);
+  const events = await pool.query('SELECT id, event_type, payload, created_at FROM agent_task_events WHERE request_id = $1 AND id > $2 ORDER BY id ASC', [requestId, after]);
+  return res.json({ status: 'success', task: task.rows[0], events: events.rows });
+});
+
+app.post('/api/v1/agent/tasks/:requestId/cancel', async (req, res) => {
+  const requestId = String(req.params.requestId || '').slice(0, 100);
+  const result = await pool.query("UPDATE agent_tasks SET state = 'cancelled', updated_at = NOW() WHERE request_id = $1 AND state IN ('queued', 'running') RETURNING request_id", [requestId]);
+  if (!result.rows[0]) return res.status(409).json({ error: 'Tarefa não pode ser cancelada neste estado.' });
+  await pool.query("INSERT INTO agent_task_events (request_id, event_type, payload) VALUES ($1, 'cancelled', '{}'::jsonb)", [requestId]);
+  return res.json({ status: 'cancelled', requestId });
 });
 
 // CONNECTORS ENDPOINTS (100% REAL DB STATUS & BAILEYS KEEPER PROXY)
@@ -1562,6 +1617,13 @@ function resilientAgentChat(handler) {
       console.error('[AGENT CHAT RECOVERY]', { requestId, sessionId: cleanSessionId, error: error.message });
 
       try {
+        await pool.query("UPDATE agent_tasks SET state = 'failed', error = $2, heartbeat_at = NOW(), updated_at = NOW() WHERE request_id = $1", [requestId, redact(error.message)]);
+        await pool.query("INSERT INTO agent_task_events (request_id, event_type, payload) SELECT $1, 'failed', $2::jsonb WHERE EXISTS (SELECT 1 FROM agent_tasks WHERE request_id = $1)", [requestId, JSON.stringify({ error: redact(error.message) })]);
+      } catch (taskStateError) {
+        console.error('[AGENT TASK FAILURE PERSIST ERROR]', { requestId, error: taskStateError.message });
+      }
+
+      try {
         await pool.query(`
           INSERT INTO chat_sessions (id, title, folder, created_at, updated_at)
           VALUES ($1, $2, 'Geral', NOW(), NOW())
@@ -1928,6 +1990,24 @@ app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
   let executedToolLogs = [];
 
   const cleanSessionId = String(sessionId || 'session-default').trim();
+  const requestId = String(req.body?.requestId || crypto.randomUUID()).slice(0, 100);
+  const existingTask = await pool.query('SELECT state, response, model FROM agent_tasks WHERE request_id = $1', [requestId]);
+  if (existingTask.rows[0]) {
+    const task = existingTask.rows[0];
+    return res.status(task.state === 'succeeded' ? 200 : 202).json({ status: task.state, requestId, message: task.response || 'Tarefa já registrada e em processamento.', model: task.model || 'system/task-runtime' });
+  }
+  const taskClient = await pool.connect();
+  try {
+    await taskClient.query('BEGIN');
+    await taskClient.query('INSERT INTO agent_tasks (request_id, session_id, prompt, state) VALUES ($1, $2, $3, $4)', [requestId, cleanSessionId, message, 'running']);
+    await taskClient.query("INSERT INTO agent_task_events (request_id, event_type, payload) VALUES ($1, 'received', $2::jsonb)", [requestId, JSON.stringify({ traceId: req.traceId })]);
+    await taskClient.query('COMMIT');
+  } catch (taskError) {
+    await taskClient.query('ROLLBACK');
+    throw taskError;
+  } finally {
+    taskClient.release();
+  }
 
   // Process attachments (images for vision, documents for text context)
   let attachmentContext = '';
@@ -2076,6 +2156,7 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
       }
       messages.push(message);
       for (const toolCall of message.tool_calls) {
+        await pool.query('UPDATE agent_tasks SET heartbeat_at = NOW(), updated_at = NOW() WHERE request_id = $1', [requestId]);
         let result;
         try {
           const freshKeys = await getRealVaultKeys();
@@ -2111,6 +2192,7 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
           result = { error: toolError.message };
           executedToolLogs.push(`⚠️ Falha na ação (${toolCall.function.name}): ${toolError.message}`);
         }
+        await pool.query("INSERT INTO agent_task_events (request_id, event_type, payload) VALUES ($1, 'tool_receipt', $2::jsonb)", [requestId, JSON.stringify({ tool: toolCall.function.name, status: result?.error ? 'failed' : 'succeeded' })]);
         messages.push({ role: 'tool', tool_call_id: toolCall.id, content: JSON.stringify(result) });
       }
 
@@ -2125,6 +2207,16 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
         responseTokenBudget,
         autonomyAuthorized ? TOOL_DEFINITIONS : []
       );
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        request_id VARCHAR(100) PRIMARY KEY, session_id VARCHAR(100) NOT NULL, prompt TEXT NOT NULL,
+        state VARCHAR(20) NOT NULL DEFAULT 'queued', response TEXT, model VARCHAR(100), error TEXT,
+        heartbeat_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS agent_task_events (
+        id BIGSERIAL PRIMARY KEY, request_id VARCHAR(100) NOT NULL REFERENCES agent_tasks(request_id) ON DELETE CASCADE,
+        event_type VARCHAR(40) NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_task_events_request ON agent_task_events(request_id, id);
     }
 
     if (executedToolLogs.length > 0) {
@@ -2272,13 +2364,16 @@ Sua missão é atuar como o modelo especialista de Auto-Fix de alta velocidade. 
     complexity: routing.complexity
   });
 
+  await pool.query("UPDATE agent_tasks SET state = 'succeeded', response = $2, model = $3, heartbeat_at = NOW(), updated_at = NOW() WHERE request_id = $1", [requestId, responseText, modelUsed]);
+  await pool.query("INSERT INTO agent_task_events (request_id, event_type, payload) VALUES ($1, 'succeeded', $2::jsonb)", [requestId, JSON.stringify({ model: modelUsed })]);
   res.json({
     status: 'success',
     mode,
     model: modelUsed,
     fallback: isFallback,
     complexity: routing.complexity,
-    message: responseText
+    message: responseText,
+    requestId
   });
 }));
 

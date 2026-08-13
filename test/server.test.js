@@ -58,3 +58,24 @@ test('Hermes Juliana - Chat transport never retries through an undefined functio
   assert.ok(jsContent.includes('Solicitação preservada'), 'HTTP failures must render a useful recovery response');
   assert.ok(jsContent.includes("type: 'ping'"), 'WebSocket heartbeat must be enabled');
 });
+
+test('Hermes Juliana - Production security boundaries', () => {
+  const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  const jsContent = fs.readFileSync(path.join(__dirname, '../public/app.js'), 'utf8');
+  assert.ok(serverContent.includes('HERMES_TEST_MODE=true is forbidden in production'));
+  assert.ok(serverContent.includes("res.status(401).json({ error: 'Autenticação obrigatória.' })"));
+  assert.ok(serverContent.includes("req.auth?.role === 'admin'"));
+  assert.ok(serverContent.includes('keys.map(({ rawToken, ...safe }) => safe)'));
+  assert.ok(!jsContent.includes('JulianaWsolu2026Secure'));
+});
+
+test('Hermes Juliana - Durable task and correlated logging contracts', () => {
+  const serverContent = fs.readFileSync(path.join(__dirname, '../server.js'), 'utf8');
+  assert.ok(serverContent.includes('CREATE TABLE IF NOT EXISTS agent_tasks'));
+  assert.ok(serverContent.includes('CREATE TABLE IF NOT EXISTS agent_task_events'));
+  assert.ok(serverContent.includes('/api/v1/agent/tasks/:requestId'));
+  assert.ok(serverContent.includes("existingTask.rows[0]"));
+  assert.ok(serverContent.includes("log('info', 'http_request'"));
+  assert.ok(serverContent.includes("res.setHeader('X-Request-Id'"));
+  assert.ok(serverContent.includes('[REDACTED]'));
+});

@@ -10,6 +10,15 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsHeartbeatTimer = null;
   let wsReconnectAttempt = 0;
 
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = (input, init = {}) => {
+    const url = typeof input === 'string' ? input : input.url;
+    const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
+    const token = localStorage.getItem('hermes_token');
+    if (token && url.startsWith('/api/') && !url.includes('/auth/login')) headers.set('Authorization', `Bearer ${token}`);
+    return nativeFetch(input, { ...init, headers });
+  };
+
   // INITIALIZE ALL REAL MODULES
   initLogin();
   initTabs();
@@ -49,7 +58,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     // Auto-login if previously authenticated
-    if (localStorage.getItem('hermes_auth') === 'true') {
+    if (localStorage.getItem('hermes_token')) {
       showApp();
       return;
     }
@@ -57,8 +66,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (loginForm) {
       loginForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const email = loginEmail ? loginEmail.value.trim() : 'juliana@wsolucoes.com.br';
-        const password = loginPassword ? loginPassword.value.trim() : 'JulianaWsolu2026Secure!';
+        const email = loginEmail ? loginEmail.value.trim() : '';
+        const password = loginPassword ? loginPassword.value.trim() : '';
 
         if (btnSubmit) {
           btnSubmit.disabled = true;
@@ -72,16 +81,18 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ email, password })
           });
 
-          if (res.ok) {
-            const data = await res.json();
-            if (data.token) localStorage.setItem('hermes_token', data.token);
-          }
+          if (!res.ok) throw new Error('Credenciais inválidas.');
+          const data = await res.json();
+          if (!data.token) throw new Error('Sessão não emitida.');
+          localStorage.setItem('hermes_token', data.token);
+          localStorage.setItem('hermes_auth', 'true');
+          showApp();
         } catch (err) {
-          console.warn('[Auth API] Continuar em modo autenticado:', err);
+          localStorage.removeItem('hermes_auth');
+          localStorage.removeItem('hermes_token');
+          if (btnSubmit) btnSubmit.innerHTML = '<span>Credenciais inválidas</span>';
+          return;
         }
-
-        localStorage.setItem('hermes_auth', 'true');
-        showApp();
       });
     }
   }
@@ -262,6 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
         console.log('[WebSocket] Connected to Hermes Gateway /ws');
+        ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('hermes_token') || '' }));
         wsReconnectAttempt = 0;
         clearTimeout(wsReconnectTimer);
         clearInterval(wsHeartbeatTimer);

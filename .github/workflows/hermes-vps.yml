@@ -71,7 +71,9 @@ jobs:
             mv /opt/hermes/services/hermes-webchat/Dockerfile.webchat /opt/hermes/services/hermes-webchat/Dockerfile
             printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-gateway/.dockerignore
             printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-webchat/.dockerignore
-            grep -q '^HERMES_TEST_MODE=' /opt/hermes/.env && sed -i 's/^HERMES_TEST_MODE=.*/HERMES_TEST_MODE=true/' /opt/hermes/.env || printf '\nHERMES_TEST_MODE=true\n' >> /opt/hermes/.env
+            grep -q '^HERMES_TEST_MODE=' /opt/hermes/.env && sed -i 's/^HERMES_TEST_MODE=.*/HERMES_TEST_MODE=false/' /opt/hermes/.env || printf '\nHERMES_TEST_MODE=false\n' >> /opt/hermes/.env
+            sed -i '/^HERMES_OPERATOR_TOKEN=/d' /opt/hermes/.env
+            printf '\nHERMES_OPERATOR_TOKEN=%s\n' '${{ secrets.HERMES_OPERATOR_TOKEN }}' >> /opt/hermes/.env
             docker build -t hermes-gateway-juliana:v5.1.0 /opt/hermes/services/hermes-gateway
             docker build -t hermes-webchat:v5.1.0 /opt/hermes/services/hermes-webchat
             cd /opt/hermes
