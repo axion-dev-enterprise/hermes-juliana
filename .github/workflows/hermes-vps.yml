@@ -64,6 +64,7 @@ jobs:
     runs-on: [self-hosted, linux, x64, juliana]
     environment: production
     steps:
+      - uses: actions/checkout@v4
       - name: Promote immutable images with migration and rollback
         env:
           GATEWAY_REF: ${{ env.GATEWAY_IMAGE }}@${{ needs.publish.outputs.gateway_digest }}
@@ -75,6 +76,7 @@ jobs:
         run: |
             set -eu
             test "$(printf %s "$OPERATOR_TOKEN" | wc -c)" -ge 32
+            install -m 0644 docker-compose.yml /opt/hermes/docker-compose.yml
             cd /opt/hermes
             printf %s "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin
             previous_gateway=$(docker image inspect hermes-gateway-juliana:v5.1.0 --format '{{.Id}}' 2>/dev/null || true)
