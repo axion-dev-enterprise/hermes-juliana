@@ -15,6 +15,7 @@ services:
       - REDIS_URL=${REDIS_URL:-redis://redis:6379}
       - POSTGRES_URL=${POSTGRES_URL:?POSTGRES_URL is required}
       - HERMES_OPERATOR_TOKEN=${HERMES_OPERATOR_TOKEN:-}
+      - HERMES_DEMO_PASSWORD=${HERMES_DEMO_PASSWORD:-}
       - HERMES_TEST_MODE=${HERMES_TEST_MODE:-false}
       - HERMES_SKILLS_DIR=/app/runtime-skills
       - HERMES_LOG_DIR=/app/HISTORY/audit/logs
