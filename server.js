@@ -133,6 +133,16 @@ async function initDatabaseTables() {
         status VARCHAR(50) DEFAULT 'configured',
         updated_at TIMESTAMP DEFAULT NOW()
       );
+      CREATE TABLE IF NOT EXISTS agent_tasks (
+        request_id VARCHAR(100) PRIMARY KEY, session_id VARCHAR(100) NOT NULL, prompt TEXT NOT NULL,
+        state VARCHAR(20) NOT NULL DEFAULT 'queued', response TEXT, model VARCHAR(100), error TEXT,
+        heartbeat_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE TABLE IF NOT EXISTS agent_task_events (
+        id BIGSERIAL PRIMARY KEY, request_id VARCHAR(100) NOT NULL REFERENCES agent_tasks(request_id) ON DELETE CASCADE,
+        event_type VARCHAR(40) NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMP DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_agent_task_events_request ON agent_task_events(request_id, id);
       ALTER TABLE chat_sessions ALTER COLUMN id TYPE VARCHAR(100);
       ALTER TABLE chat_messages ALTER COLUMN session_id TYPE VARCHAR(100);
     `);
@@ -2207,16 +2217,6 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
         responseTokenBudget,
         autonomyAuthorized ? TOOL_DEFINITIONS : []
       );
-      CREATE TABLE IF NOT EXISTS agent_tasks (
-        request_id VARCHAR(100) PRIMARY KEY, session_id VARCHAR(100) NOT NULL, prompt TEXT NOT NULL,
-        state VARCHAR(20) NOT NULL DEFAULT 'queued', response TEXT, model VARCHAR(100), error TEXT,
-        heartbeat_at TIMESTAMP DEFAULT NOW(), created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
-      );
-      CREATE TABLE IF NOT EXISTS agent_task_events (
-        id BIGSERIAL PRIMARY KEY, request_id VARCHAR(100) NOT NULL REFERENCES agent_tasks(request_id) ON DELETE CASCADE,
-        event_type VARCHAR(40) NOT NULL, payload JSONB NOT NULL DEFAULT '{}'::jsonb, created_at TIMESTAMP DEFAULT NOW()
-      );
-      CREATE INDEX IF NOT EXISTS idx_agent_task_events_request ON agent_task_events(request_id, id);
     }
 
     if (executedToolLogs.length > 0) {
