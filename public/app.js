@@ -64,6 +64,7 @@ document.addEventListener('DOMContentLoaded', () => {
         appContainer.style.display = 'flex';
         appContainer.classList.remove('hidden');
       }
+      initWebSocket();
     }
 
     // Auto-login if previously authenticated
@@ -276,6 +277,10 @@ document.addEventListener('DOMContentLoaded', () => {
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${wsProtocol}//${window.location.host}/ws`;
     const wsStatusLabel = document.getElementById('ws-status-text');
+    if (!localStorage.getItem('hermes_token')) {
+      if (wsStatusLabel) wsStatusLabel.textContent = 'Aguardando autenticação';
+      return;
+    }
 
     try {
       if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
@@ -308,6 +313,10 @@ document.addEventListener('DOMContentLoaded', () => {
       };
       ws.onclose = () => {
         clearInterval(wsHeartbeatTimer);
+        if (!localStorage.getItem('hermes_token')) {
+          if (wsStatusLabel) wsStatusLabel.textContent = 'Aguardando autenticação';
+          return;
+        }
         if (wsStatusLabel) wsStatusLabel.textContent = 'WebSocket Reconectando...';
         const reconnectDelay = Math.min(1000 * (2 ** wsReconnectAttempt), 15000);
         wsReconnectAttempt += 1;
