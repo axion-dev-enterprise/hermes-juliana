@@ -1,0 +1,29 @@
+name: Bootstrap pinned SSH key for JULIANA
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-bootstrap:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Install operator public key through recovery SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          password: ${{ secrets.VPS_SSH_PASSWORD }}
+          script_stop: true
+          script: |
+            set -eu
+            umask 077
+            mkdir -p "$HOME/.ssh"
+            touch "$HOME/.ssh/authorized_keys"
+            key='ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILdQ+1u01XvKVYQoIIJn5b5QH99qPEzfqMjn6z7A+o2+ axion-juliana-ops'
+            grep -qxF "$key" "$HOME/.ssh/authorized_keys" || printf '%s\n' "$key" >> "$HOME/.ssh/authorized_keys"
+            chmod 700 "$HOME/.ssh"
+            chmod 600 "$HOME/.ssh/authorized_keys"
