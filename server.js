@@ -23,6 +23,7 @@ const pool = new Pool({
 const TEST_AUTONOMY_ENABLED = process.env.HERMES_TEST_MODE === 'true';
 if (process.env.NODE_ENV === 'production' && TEST_AUTONOMY_ENABLED) throw new Error('HERMES_TEST_MODE=true is forbidden in production.');
 const OPERATOR_TOKEN = process.env.HERMES_OPERATOR_TOKEN || '';
+const DEMO_PASSWORD = process.env.HERMES_DEMO_PASSWORD || '';
 if (process.env.NODE_ENV === 'production' && Buffer.byteLength(OPERATOR_TOKEN, 'utf8') < 32) {
   throw new Error('HERMES_OPERATOR_TOKEN must contain at least 32 bytes in production.');
 }
@@ -585,8 +586,11 @@ app.post('/api/v1/auth/login', loginRateLimiter, (req, res) => {
     return res.status(503).json({ error: 'Login administrativo indisponível até configurar HERMES_OPERATOR_TOKEN.' });
   }
   const supplied = Buffer.from(String(password));
-  const expected = Buffer.from(OPERATOR_TOKEN);
-  if (supplied.length !== expected.length || !crypto.timingSafeEqual(supplied, expected)) {
+  const validPassword = [OPERATOR_TOKEN, DEMO_PASSWORD].filter(Boolean).some(candidate => {
+    const expected = Buffer.from(candidate);
+    return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+  });
+  if (!validPassword) {
     return res.status(401).json({ error: 'Credenciais inválidas.' });
   }
 

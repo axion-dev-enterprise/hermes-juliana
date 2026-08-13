@@ -69,6 +69,7 @@ jobs:
           GATEWAY_REF: ${{ env.GATEWAY_IMAGE }}@${{ needs.publish.outputs.gateway_digest }}
           WEBCHAT_REF: ${{ env.WEBCHAT_IMAGE }}@${{ needs.publish.outputs.webchat_digest }}
           OPERATOR_TOKEN: ${{ secrets.HERMES_OPERATOR_TOKEN }}
+          DEMO_PASSWORD: ${{ secrets.HERMES_DEMO_PASSWORD }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
         run: |
@@ -82,7 +83,9 @@ jobs:
             docker pull "$WEBCHAT_REF"
             docker run --rm --network hermes_hermes-network --env-file /opt/hermes/.env "$GATEWAY_REF" npm run migrate
             sed -i '/^HERMES_OPERATOR_TOKEN=/d' /opt/hermes/.env
+            sed -i '/^HERMES_DEMO_PASSWORD=/d' /opt/hermes/.env
             printf '\nHERMES_OPERATOR_TOKEN=%s\n' "$OPERATOR_TOKEN" >> /opt/hermes/.env
+            printf '\nHERMES_DEMO_PASSWORD=%s\n' "$DEMO_PASSWORD" >> /opt/hermes/.env
             docker tag "$GATEWAY_REF" hermes-gateway-juliana:v5.1.0
             docker tag "$WEBCHAT_REF" hermes-webchat:v5.1.0
             docker rm -f hermes-events 2>/dev/null || true

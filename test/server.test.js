@@ -89,6 +89,7 @@ test('Hermes Juliana - production hardening contracts', () => {
   const autonomyContent = fs.readFileSync(path.join(__dirname, '../lib/autonomy_engine.js'), 'utf8');
   assert.ok(serverContent.includes('schema_migrations'));
   assert.ok(serverContent.includes('at least 32 bytes in production'));
+  assert.ok(serverContent.includes('HERMES_DEMO_PASSWORD'));
   assert.ok(!serverContent.includes("require('child_process').execSync"));
   assert.ok(!autonomyContent.includes('execSync'));
   assert.ok(fs.existsSync(path.join(__dirname, '../scripts/migrate.js')));

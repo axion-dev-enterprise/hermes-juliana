@@ -11,12 +11,21 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsReconnectAttempt = 0;
 
   const nativeFetch = window.fetch.bind(window);
-  window.fetch = (input, init = {}) => {
+  window.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : input.url;
     const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
     const token = localStorage.getItem('hermes_token');
     if (token && url.startsWith('/api/') && !url.includes('/auth/login')) headers.set('Authorization', `Bearer ${token}`);
-    return nativeFetch(input, { ...init, headers });
+    const response = await nativeFetch(input, { ...init, headers });
+    if (response.status === 401 && url.startsWith('/api/') && !url.includes('/auth/login')) {
+      localStorage.removeItem('hermes_token');
+      localStorage.removeItem('hermes_auth');
+      const loginModal = document.getElementById('login-modal');
+      const appContainer = document.getElementById('app-container');
+      if (loginModal) loginModal.style.display = 'flex';
+      if (appContainer) appContainer.style.display = 'none';
+    }
+    return response;
   };
 
   // INITIALIZE ALL REAL MODULES
@@ -574,8 +583,10 @@ document.addEventListener('DOMContentLoaded', () => {
           friendlyMsg = '⏳ **Operação Autônoma Processada**: A tarefa envolveu etapas complexas de código ou deploy que continuaram a ser executadas no servidor. Solicitando confirmação dos dados...';
         } else if (statusCode === 502 || statusCode === 503) {
           friendlyMsg = '🔄 **Auto-Recuperação do Gateway**: O servidor backend está realizando o alinhamento de infraestrutura dos containers.';
-        } else if (statusCode === 401 || statusCode === 403) {
-          friendlyMsg = '🔑 **Credencial Pendente no Vault**: Esta operação necessita que a chave correspondente esteja ativa no Vault PostgreSQL.';
+        } else if (statusCode === 401) {
+          friendlyMsg = '🔐 **Sessão expirada**: autentique-se novamente para continuar.';
+        } else if (statusCode === 403) {
+          friendlyMsg = '🛡️ **Permissão insuficiente**: esta ação exige perfil administrativo.';
         } else if (statusCode === 429) {
           friendlyMsg = '⏳ **Cadência Controlada (Rate Limit)**: Limite temporário de requisições atingido.';
         } else {
