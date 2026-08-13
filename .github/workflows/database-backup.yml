@@ -35,7 +35,7 @@ jobs:
             docker exec "$postgres_id" sh -lc 'dropdb -U "$POSTGRES_USER" --if-exists hermes_restore_drill && createdb -U "$POSTGRES_USER" hermes_restore_drill && pg_restore -U "$POSTGRES_USER" -d hermes_restore_drill --exit-on-error /tmp/hermes-restore.dump'
             docker exec "$postgres_id" sh -lc 'psql -U "$POSTGRES_USER" -d hermes_restore_drill -Atc "select count(*) from chat_sessions; select count(*) from chat_messages; select count(*) from api_vault; select count(*) from executive_action_receipts;"' > "/opt/hermes/backups/hermes-$stamp.restore-check"
             openssl enc -aes-256-cbc -pbkdf2 -salt -in "/opt/hermes/backups/hermes-$stamp.dump" -out "/opt/hermes/backups/hermes-$stamp.dump.enc" -pass env:BACKUP_KEY
-            sha256sum "/opt/hermes/backups/hermes-$stamp.dump.enc" > "/opt/hermes/backups/hermes-$stamp.sha256"
+            cd /opt/hermes/backups && sha256sum "hermes-$stamp.dump.enc" > "hermes-$stamp.sha256"
             rm -f "/opt/hermes/backups/hermes-$stamp.dump"
             find /opt/hermes/backups -type f -mtime +30 -delete
       - name: Download encrypted evidence off-host
@@ -50,8 +50,9 @@ jobs:
           sshpass -e scp "$VPS_USER@$VPS_HOST:/opt/hermes/backups/*.dump.enc" backup-evidence/
           sshpass -e scp "$VPS_USER@$VPS_HOST:/opt/hermes/backups/*.sha256" backup-evidence/
           sshpass -e scp "$VPS_USER@$VPS_HOST:/opt/hermes/backups/*.restore-check" backup-evidence/
-          sed -i 's#.*/##' backup-evidence/*.sha256
-          cd backup-evidence && sha256sum --check *.sha256
+          cd backup-evidence
+          latest_checksum=$(ls -t *.sha256 | head -n1)
+          sha256sum --check "$latest_checksum"
       - uses: actions/upload-artifact@v4
         with:
           name: hermes-postgres-encrypted-backup-${{ github.run_id }}
