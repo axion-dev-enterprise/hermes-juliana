@@ -273,7 +273,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ws = new WebSocket(wsUrl);
       ws.onopen = () => {
         console.log('[WebSocket] Connected to Hermes Gateway /ws');
-        ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('hermes_token') || '' }));
+        ws.send(JSON.stringify({ type: 'auth', token: localStorage.getItem('hermes_token') || '', sessionId: activeSessionId || 'session-default' }));
         wsReconnectAttempt = 0;
         clearTimeout(wsReconnectTimer);
         clearInterval(wsHeartbeatTimer);
@@ -414,6 +414,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function loadSessionMessages(sessionId) {
     activeSessionId = String(sessionId);
+    if (ws?.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'subscribe', sessionId: activeSessionId }));
     localStorage.setItem('hermes_active_session', activeSessionId);
     
     document.querySelectorAll('.history-card').forEach(card => {

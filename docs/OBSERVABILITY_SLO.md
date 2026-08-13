@@ -7,6 +7,8 @@
 - Latência p95 do gateway sem execução de ferramenta: até 5 segundos.
 - Tarefas duráveis: 99,9% terminam em `succeeded`, `failed`, `cancelled` ou `unknown` reconciliável.
 - Reconexão WebSocket: até 15 segundos.
+- O gateway de eventos é um processo independente em `:8001`, usa Redis Pub/Sub e entrega eventos somente à sessão autenticada inscrita.
+- Ferramentas executam em processos efêmeros isolados, com bulkhead padrão de quatro workers, timeout e limite de 1 MiB por saída.
 
 ## Error budget
 

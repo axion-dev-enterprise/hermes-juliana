@@ -27,8 +27,9 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 20, cache: npm }
       - run: npm ci
-      - run: node --check server.js && node --check scripts/migrate.js && node --check lib/tool_worker.js
+      - run: node --check server.js && node --check event_gateway.js && node --check scripts/migrate.js && node --check lib/tool_worker.js && node --check lib/tool_worker_child.js
       - run: npm test
+      - run: node scripts/architecture_probe.js
       - name: Reject weak or committed credentials
         shell: bash
         run: |
@@ -91,7 +92,10 @@ jobs:
             printf '\nHERMES_OPERATOR_TOKEN=%s\n' "$OPERATOR_TOKEN" >> /opt/hermes/.env
             docker tag "$GATEWAY_REF" hermes-gateway-juliana:v5.1.0
             docker tag "$WEBCHAT_REF" hermes-webchat:v5.1.0
-            if ! docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat || ! timeout 90 sh -c 'until docker exec hermes-gateway-juliana wget -qO- http://127.0.0.1:8000/healthz; do sleep 3; done'; then
+            docker rm -f hermes-events 2>/dev/null || true
+            docker run -d --name hermes-events --restart always --network hermes_hermes-network --env-file /opt/hermes/.env --network-alias hermes-events "$GATEWAY_REF" node event_gateway.js
+            if ! docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat || ! timeout 90 sh -c 'until docker exec hermes-gateway-juliana wget -qO- http://127.0.0.1:8000/healthz && docker exec hermes-events wget -qO- http://127.0.0.1:8001/healthz; do sleep 3; done'; then
+              docker rm -f hermes-events 2>/dev/null || true
               test -n "$previous_gateway" && docker tag "$previous_gateway" hermes-gateway-juliana:v5.1.0
               test -n "$previous_webchat" && docker tag "$previous_webchat" hermes-webchat:v5.1.0
               docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat

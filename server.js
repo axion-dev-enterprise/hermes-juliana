@@ -4,7 +4,6 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { AsyncLocalStorage } = require('async_hooks');
-const WebSocket = require('ws');
 const { Pool } = require('pg');
 const { SYSTEM_PROMPT, MODES } = require('./prompts/juliana_system_prompt');
 const { loadConnectorDocs } = require('./lib/connector_helpers');
@@ -29,7 +28,9 @@ if (process.env.NODE_ENV === 'production' && Buffer.byteLength(OPERATOR_TOKEN, '
 }
 const revokedSessions = new Set();
 const LOG_DIR = process.env.HERMES_LOG_DIR || '/app/HISTORY/audit/logs';
-const runtimeMetrics = { requests: 0, errors5xx: 0, latencyTotalMs: 0, wsConnections: 0, wsDisconnects: 0 };
+const runtimeMetrics = { requests: 0, errors5xx: 0, latencyTotalMs: 0 };
+const Redis = require('ioredis');
+const eventPublisher = new Redis(process.env.REDIS_URL || 'redis://redis:6379', { lazyConnect: true, maxRetriesPerRequest: 1 });
 const traceStorage = new AsyncLocalStorage();
 function redact(value) { return String(value ?? '').replace(/(Bearer\s+|sk-[a-z-]*|gh[pousr]_|vck_)[A-Za-z0-9_.-]+/gi, '$1[REDACTED]'); }
 function log(level, message, fields = {}) {
@@ -432,50 +433,10 @@ function appendWhatsAppHistory(sender, role, content) {
   whatsappConvTimestamps.set(sender, Date.now());
 }
 
-// -------------------------------------------------------------
-// WEBSOCKET SERVER INTEGRATION (/ws)
-// -------------------------------------------------------------
-const wss = new WebSocket.Server({ server, path: '/ws' });
-
-wss.on('connection', (ws) => {
-  runtimeMetrics.wsConnections += 1;
-  ws.authenticated = false;
-  console.log('[WEBSOCKET] Client connected to Hermes Gateway /ws');
-  
-  ws.send(JSON.stringify({
-    type: 'system_status',
-    status: 'CONNECTED',
-    message: 'Conectado ao Hermes Central WebSocket Gateway'
-  }));
-
-  ws.on('message', (message) => {
-    try {
-      const data = JSON.parse(message);
-      if (data.type === 'auth') {
-        ws.authenticated = Boolean(verifySession(data.token));
-        return ws.send(JSON.stringify({ type: 'auth_status', authenticated: ws.authenticated }));
-      }
-      if (!ws.authenticated) return ws.close(1008, 'Authentication required');
-      if (data.type === 'ping') {
-        ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
-      }
-    } catch (err) {
-      console.warn('[WEBSOCKET] Non-JSON payload received:', message.toString());
-    }
-  });
-
-  ws.on('close', () => {
-    runtimeMetrics.wsDisconnects += 1;
-    console.log('[WEBSOCKET] Client disconnected');
-  });
-});
-
 function broadcastWs(data) {
-  wss.clients.forEach((client) => {
-    if (client.readyState === WebSocket.OPEN && client.authenticated) {
-      client.send(JSON.stringify(data));
-    }
-  });
+  const payload = JSON.stringify(data);
+  if (eventPublisher.status === 'wait') eventPublisher.connect().catch(error => log('warn', 'event_bus_connect_failed', { error: error.message }));
+  eventPublisher.publish('hermes:events', payload).catch(error => log('warn', 'event_publish_failed', { error: error.message }));
 }
 
 // -------------------------------------------------------------
@@ -512,7 +473,7 @@ app.get('/api/v1/health', async (req, res) => {
       postgresql: dbStatus,
       redis: redisStatus,
       openrouter: 'ACTIVE',
-      websocket: wss.clients.size > 0 ? 'ACTIVE' : 'STANDBY'
+      event_bus: eventPublisher.status === 'ready' ? 'ACTIVE' : 'CONNECTING'
     }
   });
 });
@@ -576,8 +537,8 @@ app.get('/healthz', async (req, res) => {
   // OpenRouter (HEAD /api/v1/auth/key)
   checks.openrouter = await _openrouterCheck();
 
-  // WebSocket server
-  checks.ws = (server.listening && wss) ? 'ok' : 'down';
+  // Independent event gateway is fed through Redis pub/sub.
+  checks.ws = checks.redis === 'ok' ? 'ok' : 'down';
 
   const allOk = Object.values(checks).every((v) => v === 'ok' || v === 'STANDBY' || v === 'ACTIVE');
   const status = allOk ? 'ok' : 'degraded';
@@ -1035,7 +996,7 @@ app.get('/api/v1/observability/metrics', async (req, res) => {
     uptime_seconds: Math.round((Date.now() - STARTED_AT) / 1000),
     http: { ...runtimeMetrics, average_latency_ms: runtimeMetrics.requests ? Math.round(runtimeMetrics.latencyTotalMs / runtimeMetrics.requests) : 0 },
     tasks: Object.fromEntries(states.rows.map(row => [row.state, row.count])),
-    websocket: { active: wss.clients.size }
+    eventGateway: { transport: 'redis-pubsub', publisherStatus: eventPublisher.status }
   });
 });
 
