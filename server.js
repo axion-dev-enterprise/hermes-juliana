@@ -928,6 +928,29 @@ app.post('/api/v1/vault', async (req, res) => {
   res.json({ status: 'success', message: `Token para [${serviceName.toUpperCase()}] armazenado no Vault real com sucesso.` });
 });
 
+app.delete('/api/v1/vault/:service', async (req, res) => {
+  const serviceName = String(req.params.service || '').toLowerCase().trim();
+  const removableServices = new Set(['github', 'vercel']);
+  if (!removableServices.has(serviceName)) {
+    return res.status(400).json({ error: 'Serviço não autorizado para remoção por esta rota.' });
+  }
+
+  try {
+    const result = await pool.query(
+      'DELETE FROM api_vault WHERE LOWER(service_name) = $1 RETURNING service_name',
+      [serviceName]
+    );
+    return res.json({
+      status: 'success',
+      service: serviceName,
+      removed: result.rowCount > 0
+    });
+  } catch (err) {
+    console.error('[DB VAULT DELETE ERROR]:', err.message);
+    return res.status(500).json({ error: 'Falha ao remover serviço do Vault.' });
+  }
+});
+
 // CONNECTORS ENDPOINTS (100% REAL DB STATUS & BAILEYS KEEPER PROXY)
 const WHATSAPP_KEEPER_URL = process.env.WHATSAPP_KEEPER_URL || 'http://hermes-whatsapp-keeper:3000';
 
