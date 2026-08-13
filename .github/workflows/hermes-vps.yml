@@ -72,7 +72,9 @@ jobs:
             printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-gateway/.dockerignore
             printf 'node_modules\n.git\ndist\ntest\n' > /opt/hermes/services/hermes-webchat/.dockerignore
             grep -q '^HERMES_TEST_MODE=' /opt/hermes/.env && sed -i 's/^HERMES_TEST_MODE=.*/HERMES_TEST_MODE=true/' /opt/hermes/.env || printf '\nHERMES_TEST_MODE=true\n' >> /opt/hermes/.env
+            docker build -t hermes-gateway-juliana:v5.1.0 /opt/hermes/services/hermes-gateway
+            docker build -t hermes-webchat:v5.1.0 /opt/hermes/services/hermes-webchat
             cd /opt/hermes
-            docker compose up -d --build hermes-gateway hermes-webchat
+            docker compose up -d --no-build --force-recreate hermes-gateway hermes-webchat
             sleep 10
             docker exec hermes-gateway-juliana wget -qO- http://127.0.0.1:8000/healthz
