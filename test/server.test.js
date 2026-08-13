@@ -90,6 +90,8 @@ test('Hermes Juliana - operational requests cannot finish as promises without re
   assert.ok(serverContent.includes('[ACTION COMPLETION GUARD]'));
   assert.ok(serverContent.includes('Tarefa não iniciada'));
   assert.ok(serverContent.includes('executedToolLogs.length === 0'));
+  assert.ok(serverContent.includes("completionState = 'incomplete'"));
+  assert.ok(serverContent.includes('Promessa ou pedido de confirmação rejeitado'));
 });
 
 test('Hermes Juliana - production hardening contracts', () => {

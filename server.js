@@ -201,7 +201,7 @@ function isOperationalActionRequest(text) {
 }
 
 function isUnfinishedCommitment(text) {
-  return /\b(vou|irei|farei|começarei|iniciarei|primeiro vou|em seguida vou)\b/i.test(String(text || ''));
+  return /\b(vou|irei|farei|começarei|iniciarei|posso (?:fazer|criar|executar|prosseguir)|executo imediatamente|ao confirmar|aguardando confirmaç(?:ão|ao)|confirme para|primeiro vou|em seguida vou)\b/i.test(String(text || ''));
 }
 
 // SECURITY GUARDRAIL: Automatically mask unmasked API keys / tokens in chat outputs to prevent credentials leakage
@@ -2367,6 +2367,17 @@ Sua missão é atuar como o modelo especialista de Auto-Fix de alta velocidade. 
 
   // Intercept False Positive Claims & Token Leaks
   responseText = sanitizeSensitiveTokens(sanitizeFalsePositiveClaims(responseText, executedToolLogs));
+  let completionState = 'succeeded';
+  if (isOperationalActionRequest(fullPromptMessage) && isUnfinishedCommitment(responseText)) {
+    completionState = 'incomplete';
+    isFallback = true;
+    responseText = `## Execução não concluída
+
+A tarefa foi iniciada, mas o runtime não produziu uma conclusão verificável. Nenhum deploy, URL, IP ou porta deve ser considerado entregue sem recibo factual e validação HTTP.
+
+Não é necessária nova autorização da administradora. A operação precisa ser retomada por uma ferramenta compatível com o ambiente da VPS.`;
+    console.warn('[ACTION COMPLETION GUARD] Promessa ou pedido de confirmação rejeitado na resposta final. Tarefa marcada como incomplete.');
+  }
 
   try {
     await pool.query(`
@@ -2389,16 +2400,17 @@ Sua missão é atuar como o modelo especialista de Auto-Fix de alta velocidade. 
   broadcastWs({
     type: 'agent_chat_response',
     sessionId: cleanSessionId,
+    status: completionState,
     message: responseText,
     model: modelUsed,
     fallback: isFallback,
     complexity: routing.complexity
   });
 
-  await pool.query("UPDATE agent_tasks SET state = 'succeeded', response = $2, model = $3, heartbeat_at = NOW(), updated_at = NOW() WHERE request_id = $1", [requestId, responseText, modelUsed]);
-  await pool.query("INSERT INTO agent_task_events (request_id, event_type, payload) VALUES ($1, 'succeeded', $2::jsonb)", [requestId, JSON.stringify({ model: modelUsed })]);
+  await pool.query('UPDATE agent_tasks SET state = $2, response = $3, model = $4, heartbeat_at = NOW(), updated_at = NOW() WHERE request_id = $1', [requestId, completionState, responseText, modelUsed]);
+  await pool.query('INSERT INTO agent_task_events (request_id, event_type, payload) VALUES ($1, $2, $3::jsonb)', [requestId, completionState, JSON.stringify({ model: modelUsed })]);
   res.json({
-    status: 'success',
+    status: completionState === 'succeeded' ? 'success' : completionState,
     mode,
     model: modelUsed,
     fallback: isFallback,
