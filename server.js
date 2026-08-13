@@ -1901,6 +1901,21 @@ async function executeExecutiveActionMandate(message) {
   const msgLower = (message || '').toLowerCase();
   const actionsTaken = [];
 
+  if (msgLower.includes('landing page') && msgLower.includes('deploy') && (msgLower.includes('vps') || msgLower.includes('local'))) {
+    try {
+      const deployed = await executeAutonomyAction('DEPLOY_STATIC_LANDING_TO_VPS', {
+        projectName: `landing-juliana-${Date.now()}`,
+        title: 'Landing Page — W Soluções Tecnologia',
+        headline: 'Soluções digitais para acelerar resultados',
+        description: 'Landing page profissional criada e publicada pelo Hermes Central Juliana.',
+        callToAction: 'Fale com a W Soluções'
+      }, []);
+      actionsTaken.push(`✅ [DEPLOY VPS VALIDADO]: URL pública ${deployed.publicUrl} — HTTP ${deployed.httpStatus} — título verificado.`);
+    } catch (error) {
+      actionsTaken.push(`⚠️ [DEPLOY VPS NÃO CONCLUÍDO]: ${error.message}`);
+    }
+  }
+
   // CLEAR ALL SESSIONS MANDATE
   if ((msgLower.includes('sess') || msgLower.includes('histórico') || msgLower.includes('historico')) && (msgLower.includes('limp') || msgLower.includes('apag') || msgLower.includes('delet'))) {
     try {
@@ -2053,6 +2068,7 @@ app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
 
   // 1. Execute Real Atomic DB Actions if commanded by Juliana
   const executedActionsResult = autonomyAuthorized ? await executeExecutiveActionMandate(fullPromptMessage) : '';
+  if (executedActionsResult) executedToolLogs.push(executedActionsResult);
 
   // 2. Persistent PostgreSQL Conversation History for Webchat (No parseInt/NaN limitation!)
   try {
@@ -2168,7 +2184,7 @@ ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
       autonomyAuthorized ? TOOL_DEFINITIONS : []
     );
 
-    if (isOperationalActionRequest(fullPromptMessage) && !(Array.isArray(message?.tool_calls) && message.tool_calls.length)) {
+    if (isOperationalActionRequest(fullPromptMessage) && executedToolLogs.length === 0 && !(Array.isArray(message?.tool_calls) && message.tool_calls.length)) {
       const rejectedDraft = typeof message?.content === 'string' ? message.content.trim() : '';
       console.warn('[ACTION COMPLETION GUARD] Modelo respondeu sem ferramenta a uma solicitação operacional. Forçando nova decisão.');
       messages.push({ role: 'assistant', content: rejectedDraft || 'Não iniciei nenhuma execução.' });

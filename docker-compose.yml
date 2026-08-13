@@ -19,11 +19,14 @@ services:
       - HERMES_TEST_MODE=${HERMES_TEST_MODE:-false}
       - HERMES_SKILLS_DIR=/app/runtime-skills
       - HERMES_LOG_DIR=/app/HISTORY/audit/logs
+      - HERMES_LANDINGS_DIR=/app/landings
+      - HERMES_PUBLIC_URL=https://juliana.axionenterprise.cloud
     volumes:
       - ./docs:/app/docs
       - ./lib:/app/lib
       - hermes_audit:/app/HISTORY/audit
       - hermes_skills:/app/runtime-skills
+      - hermes_landings:/app/landings
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8000/healthz"]
       interval: 30s
@@ -44,12 +47,15 @@ services:
       - "80:80"
     depends_on:
       - hermes-gateway
+    volumes:
+      - hermes_landings:/usr/share/nginx/html/landings:ro
     networks:
       - hermes-network
 
 volumes:
   hermes_audit:
   hermes_skills:
+  hermes_landings:
 
 networks:
   hermes-network:
