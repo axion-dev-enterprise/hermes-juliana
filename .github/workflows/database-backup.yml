@@ -39,14 +39,19 @@ jobs:
             rm -f "/opt/hermes/backups/hermes-$stamp.dump"
             find /opt/hermes/backups -type f -mtime +30 -delete
       - name: Download encrypted evidence off-host
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_SSH_PASSWORD }}
-          source: /opt/hermes/backups/*
-          target: backup-evidence
-          strip_components: 3
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          SSHPASS: ${{ secrets.VPS_SSH_PASSWORD }}
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq sshpass
+          mkdir -p backup-evidence ~/.ssh
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          sshpass -e scp "$VPS_USER@$VPS_HOST:/opt/hermes/backups/*.dump.enc" backup-evidence/
+          sshpass -e scp "$VPS_USER@$VPS_HOST:/opt/hermes/backups/*.sha256" backup-evidence/
+          sshpass -e scp "$VPS_USER@$VPS_HOST:/opt/hermes/backups/*.restore-check" backup-evidence/
+          sed -i 's#.*/##' backup-evidence/*.sha256
+          cd backup-evidence && sha256sum --check *.sha256
       - uses: actions/upload-artifact@v4
         with:
           name: hermes-postgres-encrypted-backup-${{ github.run_id }}
