@@ -32,7 +32,8 @@ jobs:
       - name: Reject weak or committed credentials
         shell: bash
         run: |
-          ! git grep -nE '(axion123|gh[pousr]_[A-Za-z0-9]{20,}|sk-or-[A-Za-z0-9_-]{20,})' -- ':!package-lock.json'
+          ! rg -n '(axion123|gh[pousr]_[A-Za-z0-9]{20,}|sk-or-[A-Za-z0-9_-]{20,})' . \
+            --glob '!package-lock.json' --glob '!.github/workflows/hermes-vps.yml' --glob '!.git/**'
 
   publish:
     needs: validate
