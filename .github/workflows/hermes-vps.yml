@@ -61,24 +61,17 @@ jobs:
 
   deploy:
     needs: publish
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, juliana]
     environment: production
     steps:
       - name: Promote immutable images with migration and rollback
-        uses: appleboy/ssh-action@v1.2.0
         env:
           GATEWAY_REF: ${{ env.GATEWAY_IMAGE }}@${{ needs.publish.outputs.gateway_digest }}
           WEBCHAT_REF: ${{ env.WEBCHAT_IMAGE }}@${{ needs.publish.outputs.webchat_digest }}
           OPERATOR_TOKEN: ${{ secrets.HERMES_OPERATOR_TOKEN }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USER: ${{ github.actor }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          password: ${{ secrets.VPS_SSH_PASSWORD }}
-          envs: GATEWAY_REF,WEBCHAT_REF,OPERATOR_TOKEN,GHCR_TOKEN,GHCR_USER
-          script_stop: true
-          script: |
+        run: |
             set -eu
             test "$(printf %s "$OPERATOR_TOKEN" | wc -c)" -ge 32
             cd /opt/hermes
