@@ -75,4 +75,4 @@ jobs:
             cd /opt/hermes
             docker compose up -d --build hermes-gateway hermes-webchat
             sleep 10
-            docker exec hermes-gateway wget -qO- http://127.0.0.1:8000/healthz
+            docker exec hermes-gateway-juliana wget -qO- http://127.0.0.1:8000/healthz
