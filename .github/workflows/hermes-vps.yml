@@ -55,7 +55,7 @@ jobs:
         with: { context: ., file: Dockerfile.webchat, push: true, tags: '${{ env.WEBCHAT_IMAGE }}:${{ github.sha }}' }
       - uses: anchore/sbom-action@v0
         with: { image: '${{ env.GATEWAY_IMAGE }}@${{ steps.gateway.outputs.digest }}', artifact-name: gateway-sbom.spdx.json }
-      - uses: aquasecurity/trivy-action@0.28.0
+      - uses: aquasecurity/trivy-action@v0.36.0
         with: { image-ref: '${{ env.GATEWAY_IMAGE }}@${{ steps.gateway.outputs.digest }}', severity: 'CRITICAL', exit-code: '1' }
 
   deploy:
