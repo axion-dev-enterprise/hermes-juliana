@@ -10,6 +10,7 @@ const { loadConnectorDocs } = require('./lib/connector_helpers');
 const { TOOL_DEFINITIONS, executeAutonomyAction } = require('./lib/autonomy_engine');
 const { SESSION_STATES, updateSessionState, getSessionState, retrieveRelevantMemories } = require('./lib/session_fsm');
 const integrationsKb = require('./lib/integrations_kb.json');
+const { checkKnownNumber, hasPermission, checkActionPermission } = require("./lib/known_numbers");
 const hermesAgentBridge = require('./lib/hermes_agent_bridge');
 
 const app = express();
@@ -1015,6 +1016,21 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
 
   if (sender && message) {
     console.log(`[WHATSAPP WEBHOOK] Routing message from ${pushName || sender} to Juliana LLM...`);
+      // Verificar permissões do número conhecido
+      const knownNumber = await checkKnownNumber(sender);
+      if (!knownNumber) {
+        console.log(`[WHATSAPP WEBHOOK] Número não autorizado: ${sender}`);
+        await fetch(`${WHATSAPP_KEEPER_URL}/send`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            recipient: sender,
+            message: '⚠️ Este número não está autorizado a utilizar os serviços do Hermes Juliana. Solicite acesso ao administrador.'
+          })
+        }).catch(() => {});
+        return res.json({ status: 'UNAUTHORIZED' });
+      }
+      console.log(`[WHATSAPP WEBHOOK] Número autorizado: ${knownNumber.name} (${knownNumber.role})`);
     try {
       const crmIntelligence = await registerWhatsAppCrmIntelligence({ sender, pushName, message });
       if (crmIntelligence) console.log('[CRM WHATSAPP] Lead classified:', crmIntelligence.classification, crmIntelligence.stage);
@@ -1099,6 +1115,25 @@ app.post('/api/v1/connectors/whatsapp/webhook', async (req, res) => {
                   })
                 }).catch(() => {});
               } catch (waProgressErr) {}
+            }
+            // Verificar permissão para ferramentas específicas
+            const toolName = toolCall.function.name;
+            let requiredPermission = null;
+            if (toolName.includes('GITHUB') || toolName.includes('VERCEL') || toolName.includes('DEPLOY')) {
+              requiredPermission = 'dev';
+            } else if (toolName.includes('CLICKUP') || toolName.includes('TASK')) {
+              requiredPermission = 'dev';
+            } else if (toolName.includes('ASAAS') || toolName.includes('PAYMENT') || toolName.includes('BILLING')) {
+              requiredPermission = 'financial';
+            }
+            if (requiredPermission) {
+              const permCheck = await checkActionPermission(sender, requiredPermission);
+              if (!permCheck.allowed) {
+                console.log(`[WHATSAPP TOOL BLOCKED] ${toolName} bloqueado para ${sender}: ${permCheck.reason}`);
+                toolResult = { error: permCheck.reason };
+                executedToolLogs.push(`🚫 [${toolName}]: ${permCheck.reason}`);
+                continue;
+              }
             }
 
             toolResult = await executeAutonomyAction(toolCall.function.name, JSON.parse(toolCall.function.arguments || '{}'), keys);
