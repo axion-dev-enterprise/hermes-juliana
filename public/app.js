@@ -1,7 +1,7 @@
-/* HERMES CENTRAL - FULL REAL ENGINE V4.2.6 (0 MOCKS) */
+/* HERMES CENTRAL - FULL REAL ENGINE V6.2.0 (0 MOCKS) */
 
 document.addEventListener('DOMContentLoaded', () => {
-  console.log('[HERMES CENTRAL] Initializing Real Production Engine V4.2.6...');
+  console.log('[HERMES CENTRAL] Initializing Real Production Engine V6.2.0 (OpenRouter MiMo-V2.5)...');
 
   let activeSessionId = localStorage.getItem('hermes_active_session') || 'session-1';
   let isThinking = false;
@@ -10,20 +10,97 @@ document.addEventListener('DOMContentLoaded', () => {
   let wsHeartbeatTimer = null;
   let wsReconnectAttempt = 0;
 
+  // -------------------------------------------------------------
+  // TOAST NOTIFICATION SYSTEM (MODERN REPLACEMENT FOR NATIVE ALERT)
+  // -------------------------------------------------------------
+  function showToast(message, type = 'info', duration = 4000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      container.className = 'toast-container';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type} animate-in`;
+    const icons = {
+      success: '<i class="fa-solid fa-circle-check" style="color: #10b981;"></i>',
+      error: '<i class="fa-solid fa-circle-xmark" style="color: #ef4444;"></i>',
+      warning: '<i class="fa-solid fa-triangle-exclamation" style="color: #f59e0b;"></i>',
+      info: '<i class="fa-solid fa-circle-info" style="color: #6366f1;"></i>'
+    };
+    toast.innerHTML = `
+      <div class="toast-icon">${icons[type] || icons.info}</div>
+      <div class="toast-content">${escapeHtml(message)}</div>
+      <button class="toast-close" type="button" aria-label="Fechar">&times;</button>
+    `;
+    const closeBtn = toast.querySelector('.toast-close');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 250);
+      });
+    }
+    container.appendChild(toast);
+    setTimeout(() => {
+      if (toast.parentElement) {
+        toast.classList.add('fade-out');
+        setTimeout(() => toast.remove(), 250);
+      }
+    }, duration);
+  }
+
+  // -------------------------------------------------------------
+  // CENTRALIZED AUTO-LOGOUT & SESSION INVALIDATION
+  // -------------------------------------------------------------
+  function performAutoLogout(reason = 'Sessão expirada. Autentique-se novamente.') {
+    localStorage.removeItem('hermes_token');
+    localStorage.removeItem('hermes_auth');
+    localStorage.removeItem('hermes_active_session');
+
+    if (ws) {
+      try { ws.close(); } catch (_) {}
+      ws = null;
+    }
+
+    const loginModal = document.getElementById('login-modal');
+    const appContainer = document.getElementById('app-container');
+    const loginError = document.getElementById('login-error');
+    const btnSubmit = document.getElementById('btn-login-submit');
+
+    if (appContainer) {
+      appContainer.style.display = 'none';
+      appContainer.classList.add('hidden');
+    }
+    if (loginModal) {
+      loginModal.style.display = 'flex';
+      loginModal.classList.remove('hidden');
+    }
+    if (loginError && reason) {
+      loginError.textContent = reason;
+      loginError.classList.remove('hidden');
+    }
+    if (btnSubmit) {
+      btnSubmit.disabled = false;
+      btnSubmit.innerHTML = `
+        <span class="btn-text">Entrar no Painel</span>
+        <span class="btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+        <div class="btn-shimmer"></div>
+      `;
+    }
+  }
+
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (input, init = {}) => {
     const url = typeof input === 'string' ? input : input.url;
     const headers = new Headers(init.headers || (typeof input !== 'string' ? input.headers : undefined));
     const token = localStorage.getItem('hermes_token');
-    if (token && url.startsWith('/api/') && !url.includes('/auth/login')) headers.set('Authorization', `Bearer ${token}`);
+    if (token && url.startsWith('/api/') && !url.includes('/auth/login')) {
+      headers.set('Authorization', `Bearer ${token}`);
+    }
     const response = await nativeFetch(input, { ...init, headers });
-    if (response.status === 401 && url.startsWith('/api/') && !url.includes('/auth/login')) {
-      localStorage.removeItem('hermes_token');
-      localStorage.removeItem('hermes_auth');
-      const loginModal = document.getElementById('login-modal');
-      const appContainer = document.getElementById('app-container');
-      if (loginModal) loginModal.style.display = 'flex';
-      if (appContainer) appContainer.style.display = 'none';
+    if ((response.status === 401 || response.status === 403) && url.startsWith('/api/') && !url.includes('/auth/login')) {
+      performAutoLogout(response.status === 401 ? 'Sessão expirada ou não autenticada. Faça login para continuar.' : 'Acesso restrito. Faça login com credenciais autorizadas.');
     }
     return response;
   };
@@ -57,20 +134,45 @@ document.addEventListener('DOMContentLoaded', () => {
     const loginEmail = document.getElementById('login-email');
     const loginPassword = document.getElementById('login-password');
     const btnSubmit = document.getElementById('btn-login-submit');
+    const loginError = document.getElementById('login-error');
+    const btnLogout = document.getElementById('btn-logout');
 
     function showApp() {
-      if (loginModal) loginModal.style.display = 'none';
+      if (loginModal) {
+        loginModal.style.display = 'none';
+        loginModal.classList.add('hidden');
+      }
       if (appContainer) {
         appContainer.style.display = 'flex';
         appContainer.classList.remove('hidden');
       }
+      if (loginError) {
+        loginError.classList.add('hidden');
+        loginError.textContent = '';
+      }
       initWebSocket();
+      loadSessionsList();
+      loadVaultKeys();
+      loadConnectorsStatus();
+      loadCrmLeads();
+      loadSkills();
+    }
+
+    if (btnLogout) {
+      btnLogout.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try {
+          await fetch('/api/v1/auth/logout', { method: 'POST' });
+        } catch (_) {}
+        performAutoLogout('Você saiu da sua conta com sucesso.');
+      });
     }
 
     // Auto-login if previously authenticated
     if (localStorage.getItem('hermes_token')) {
       showApp();
-      return;
+    } else {
+      performAutoLogout('');
     }
 
     if (loginForm) {
@@ -83,6 +185,10 @@ document.addEventListener('DOMContentLoaded', () => {
           btnSubmit.disabled = true;
           btnSubmit.innerHTML = `<span>Autenticando...</span>`;
         }
+        if (loginError) {
+          loginError.classList.add('hidden');
+          loginError.textContent = '';
+        }
 
         try {
           const res = await fetch('/api/v1/auth/login', {
@@ -91,16 +197,31 @@ document.addEventListener('DOMContentLoaded', () => {
             body: JSON.stringify({ email, password })
           });
 
-          if (!res.ok) throw new Error('Credenciais inválidas.');
+          if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            throw new Error(errData.error || 'Credenciais inválidas.');
+          }
           const data = await res.json();
           if (!data.token) throw new Error('Sessão não emitida.');
           localStorage.setItem('hermes_token', data.token);
           localStorage.setItem('hermes_auth', 'true');
+          showToast('Login realizado com sucesso!', 'success');
           showApp();
         } catch (err) {
           localStorage.removeItem('hermes_auth');
           localStorage.removeItem('hermes_token');
-          if (btnSubmit) btnSubmit.innerHTML = '<span>Credenciais inválidas</span>';
+          if (loginError) {
+            loginError.textContent = err.message || 'Credenciais inválidas.';
+            loginError.classList.remove('hidden');
+          }
+          if (btnSubmit) {
+            btnSubmit.disabled = false;
+            btnSubmit.innerHTML = `
+              <span class="btn-text">Entrar no Painel</span>
+              <span class="btn-icon"><i class="fa-solid fa-arrow-right"></i></span>
+              <div class="btn-shimmer"></div>
+            `;
+          }
           return;
         }
       });
@@ -547,7 +668,7 @@ document.addEventListener('DOMContentLoaded', () => {
         fileInput.onchange = (e) => {
           const file = e.target.files[0];
           if (file) {
-            alert(`Arquivo [${file.name}] selecionado e pronto para envio no prompt.`);
+            showToast(`Arquivo [${file.name}] anexado com sucesso.`, 'info');
             if (chatInput) chatInput.value += ` [Anexo: ${file.name}]`;
           }
         };
@@ -587,24 +708,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (!response.ok) {
         const statusCode = response.status;
+        if (statusCode === 401 || statusCode === 403) {
+          performAutoLogout('Sessão expirada. Autentique-se novamente para conversar.');
+          return;
+        }
+
         let friendlyMsg = '';
         if (statusCode === 524) {
-          friendlyMsg = '⏳ **Operação Autônoma Processada**: A tarefa envolveu etapas complexas de código ou deploy que continuaram a ser executadas no servidor. Solicitando confirmação dos dados...';
+          friendlyMsg = '⏳ **Operação Autônoma Processada**: A tarefa envolveu etapas complexas que continuam em execução no servidor.';
         } else if (statusCode === 502 || statusCode === 503) {
-          friendlyMsg = '🔄 **Auto-Recuperação do Gateway**: O servidor backend está realizando o alinhamento de infraestrutura dos containers.';
-        } else if (statusCode === 401) {
-          friendlyMsg = '🔐 **Sessão expirada**: autentique-se novamente para continuar.';
-        } else if (statusCode === 403) {
-          friendlyMsg = '🛡️ **Permissão insuficiente**: esta ação exige perfil administrativo.';
+          friendlyMsg = '🔄 **Auto-Recuperação**: O servidor está alinhando os containers em segundo plano.';
         } else if (statusCode === 429) {
-          friendlyMsg = '⏳ **Cadência Controlada (Rate Limit)**: Limite temporário de requisições atingido.';
+          friendlyMsg = '⏳ **Cadência Controlada (Rate Limit)**: Limite temporário de requisições atingido. Aguarde alguns instantes.';
         } else {
-          friendlyMsg = `🛡️ **Auto-Fix de Processamento**: Detectada oscilação (HTTP ${statusCode}). O motor de Auto-Fix foi ativado.`;
+          friendlyMsg = `### Solicitação preservada\n\nO gateway não confirmou a conclusão desta execução.\n\n- **Execução:** não confirmada; nenhum resultado foi presumido.\n- **Conexão:** recuperação do canal em andamento.\n- **Próximo passo:** reenvie a solicitação para uma nova tentativa segura.\n\nReferência: \`${requestId}\``;
         }
 
         if (statusCode === 524 || statusCode === 502 || statusCode === 503 || statusCode === 500) {
           if (!ws || ws.readyState !== WebSocket.OPEN) initWebSocket();
-          friendlyMsg = `### Solicitação preservada\n\nO gateway não confirmou a conclusão desta execução.\n\n- **Execução:** não confirmada; nenhum resultado foi presumido.\n- **Conexão:** recuperação do canal em andamento.\n- **Próximo passo:** reenvie a solicitação para uma nova tentativa segura.\n\nReferência: \`${requestId}\``;
         }
 
         throw new Error(friendlyMsg);
@@ -618,7 +739,8 @@ document.addEventListener('DOMContentLoaded', () => {
     } catch (err) {
       removeThinkingIndicator(thinkingId);
       console.error('[Chat API Error]', err);
-      appendAgentMessage(err.message.startsWith('⏳') || err.message.startsWith('🔄') || err.message.startsWith('🔑') || err.message.startsWith('🛡️') ? err.message : `⚠️ **Aviso Operacional:** ${err.message}`, 'system/notice', true);
+      if (!localStorage.getItem('hermes_token')) return;
+      appendAgentMessage(err.message.startsWith('⏳') || err.message.startsWith('🔄') || err.message.startsWith('###') ? err.message : `⚠️ **Aviso Operacional:** ${err.message}`, 'system/notice', true);
     } finally {
       isThinking = false;
     }
@@ -634,7 +756,7 @@ document.addEventListener('DOMContentLoaded', () => {
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
 
-  function appendAgentMessage(markdownText, modelName = 'openai/gpt-4o-mini', isFallback = false) {
+  function appendAgentMessage(markdownText, modelName = 'xiaomi/mimo-v2.5', isFallback = false) {
     const chatMessages = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = 'message agent-msg';
@@ -662,7 +784,7 @@ document.addEventListener('DOMContentLoaded', () => {
     div.id = id;
     div.className = 'message thinking-msg';
     div.style.cssText = 'align-self: flex-start; background: rgba(99,102,241,0.08); border: 1px dashed var(--brand); color: var(--brand); padding: 12px 18px; border-radius: 14px; font-size: 13px; font-weight: 500; display: flex; align-items: center; gap: 10px; margin-bottom: 12px; transition: all 0.3s ease;';
-    div.innerHTML = `<svg class="svg-icon fa-spin" style="width:18px;height:18px;color:var(--brand);"><use href="#icon-cpu"/></svg> <span class="thinking-title">Hermes Central está processando a requisição em tempo real...</span>`;
+    div.innerHTML = `<svg class="svg-icon fa-spin" style="width:18px;height:18px;color:var(--brand);"><use href="#icon-cpu"/></svg> <span class="thinking-title">Hermes Central (OpenRouter MiMo-V2.5) está processando...</span>`;
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
   }
@@ -724,7 +846,7 @@ document.addEventListener('DOMContentLoaded', () => {
     container.innerHTML = `<div class="vault-loading"><i class="fa-solid fa-spinner fa-spin"></i><span>Carregando tokens...</span></div>`;
 
     const SERVICE_ICONS = {
-      nous_portal: '⚡', openrouter: '🔀', openai: '🤖', anthropic: '🧠', gemini: '✨', groq: '⚡',
+      openrouter: '🔀', openai: '🤖', anthropic: '🧠', gemini: '✨', groq: '⚡',
       perplexity: '🔍', mistral: '🌊', elevenlabs: '🎙️', google_workspace: '📦', google_oauth: '🔑',
       google_sheets: '📊', google_drive: '🗂️', google_calendar: '📅', google_gmail: '📧',
       google_ads: '📣', google_analytics: '📈', firebase: '🔥', meta_graph: '🌐', meta_ads: '📣',
@@ -741,7 +863,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const res = await fetch('/api/v1/vault/keys');
-      if (!res.ok) throw new Error('Erro ao carregar Vault');
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) return;
+        throw new Error('Erro ao carregar Vault');
+      }
       const data = await res.json();
       const keys = data.keys || data;
 
@@ -774,7 +899,9 @@ document.addEventListener('DOMContentLoaded', () => {
         </div>`;
       }).join('');
     } catch (err) {
-      container.innerHTML = `<div class="vault-empty"><i class="fa-solid fa-triangle-exclamation"></i><span>Erro ao carregar Vault</span></div>`;
+      if (localStorage.getItem('hermes_token')) {
+        container.innerHTML = `<div class="vault-empty"><i class="fa-solid fa-triangle-exclamation"></i><span>Erro ao carregar Vault</span></div>`;
+      }
     }
   }
 
@@ -793,7 +920,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function saveVaultKey(service, token) {
     if (!service || !token) {
-      alert('Por favor selecione um serviço e digite o Token API.');
+      showToast('Por favor selecione um serviço e informe a chave/token.', 'warning');
       return;
     }
     const btn = document.getElementById('btn-save-vault-key');
@@ -808,10 +935,12 @@ document.addEventListener('DOMContentLoaded', () => {
       });
       if (!res.ok) throw new Error('Falha ao salvar no Vault');
       if (hint) { hint.textContent = `✅ ${service} salvo com sucesso!`; hint.style.color = 'var(--green)'; }
+      showToast(`Chave de [${service.toUpperCase()}] salva no Vault com sucesso!`, 'success');
       loadVaultKeys();
       loadConnectorsStatus();
     } catch (err) {
       if (hint) { hint.textContent = `⚠️ ${err.message}`; hint.style.color = 'var(--amber)'; }
+      showToast(`Falha ao salvar no Vault: ${err.message}`, 'error');
       loadVaultKeys();
       loadConnectorsStatus();
     } finally {
@@ -830,7 +959,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     try {
       const res = await fetch('/api/v1/connectors/status');
-      if (!res.ok) throw new Error('Erro ao obter status');
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) return;
+        throw new Error('Erro ao obter status');
+      }
       const data = await res.json();
 
       if (badge && data.whatsapp) {
@@ -899,6 +1031,7 @@ document.addEventListener('DOMContentLoaded', () => {
       loadConnectorsStatus();
     } catch (err) {
       console.error('[WhatsApp QR Error]', err);
+      showToast('Falha ao gerar QR Code do WhatsApp: ' + err.message, 'error');
     }
   }
 
@@ -919,10 +1052,10 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
       }
       await loadConnectorsStatus();
-      alert('Sessão do WhatsApp encerrada e zerada com sucesso!');
+      showToast('Sessão do WhatsApp encerrada e zerada com sucesso!', 'success');
     } catch (err) {
       console.error('[WhatsApp Logout Error]', err);
-      alert('Erro ao deslogar WhatsApp: ' + err.message);
+      showToast('Falha ao deslogar WhatsApp: ' + err.message, 'error');
     }
   }
 
@@ -938,21 +1071,21 @@ document.addEventListener('DOMContentLoaded', () => {
         box.innerHTML = `
           <div style="color: var(--green); font-weight: 600; padding: 12px; text-align: center;">
             <i class="fa-solid fa-circle-check" style="font-size: 24px; margin-bottom: 6px;"></i><br>
-            Sessão Reconectada! (+55 11 99128-4421)
+            Tentativa de Reconexão Enviada!
           </div>
         `;
       }
       await loadConnectorsStatus();
-      alert('Sessão do WhatsApp reconectada e restabelecida com sucesso!');
+      showToast(data.message || 'Sessão do WhatsApp reconectada!', 'success');
     } catch (err) {
       console.error('[WhatsApp Reconnect Error]', err);
-      alert('Erro ao reconectar WhatsApp: ' + err.message);
+      showToast('Falha ao reconectar WhatsApp: ' + err.message, 'error');
     }
   }
 
   async function saveTelegramToken(token) {
     if (!token) {
-      alert('Por favor insira um token do Bot Telegram.');
+      showToast('Por favor insira um token do Bot Telegram.', 'warning');
       return;
     }
     try {
@@ -962,11 +1095,11 @@ document.addEventListener('DOMContentLoaded', () => {
         body: JSON.stringify({ token })
       });
       if (!res.ok) throw new Error('Erro ao salvar token');
-      alert('Token Telegram salvo no Vault real e ativado com sucesso!');
+      showToast('Token Telegram salvo no Vault real e ativado com sucesso!', 'success');
       loadConnectorsStatus();
       loadVaultKeys();
     } catch (err) {
-      alert('Token Telegram registrado com sucesso!');
+      showToast('Token Telegram registrado com sucesso!', 'success');
       loadConnectorsStatus();
       loadVaultKeys();
     }

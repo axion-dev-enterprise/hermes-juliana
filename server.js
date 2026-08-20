@@ -167,19 +167,26 @@ async function initDatabaseTables() {
 
     // Sync OpenRouter Vault Key para JULIANA
     try {
-      const julianaEnvPath = path.resolve('D:\\WORKSPACE\\SECURE\\VAULT\\tokens\\llm\\openrouter_juliana.env');
-      if (fs.existsSync(julianaEnvPath)) {
-        const content = fs.readFileSync(julianaEnvPath, 'utf8');
-        const match = content.match(/OPENROUTER_API_KEY=([^\s]+)/);
-        if (match) {
-          const key = match[1].trim();
-          await pool.query(`
-            INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
-            VALUES ('openrouter', $1, $1, 'configured', NOW())
-            ON CONFLICT (service_name) DO UPDATE SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW();
-          `, [key]);
-          console.log('[VAULT DB SYNC] Chave OpenRouter da JULIANA sincronizada no PostgreSQL.');
+      let openrouterKey = process.env.OPENROUTER_API_KEY || '';
+      const possibleVaultPaths = [
+        path.resolve('D:\\WORKSPACE\\SECURE\\VAULT\\tokens\\llm\\openrouter_juliana.env'),
+        '/root/vault/tokens/llm/openrouter_juliana.env',
+        '/workspace/vault/tokens/llm/openrouter_juliana.env'
+      ];
+      for (const vp of possibleVaultPaths) {
+        if (!openrouterKey && fs.existsSync(vp)) {
+          const content = fs.readFileSync(vp, 'utf8');
+          const match = content.match(/OPENROUTER_API_KEY=([^\s]+)/);
+          if (match) openrouterKey = match[1].trim();
         }
+      }
+      if (openrouterKey) {
+        await pool.query(`
+          INSERT INTO api_vault (service_name, api_key, api_token, status, updated_at)
+          VALUES ('openrouter', $1, $1, 'configured', NOW())
+          ON CONFLICT (service_name) DO UPDATE SET api_key = EXCLUDED.api_key, api_token = EXCLUDED.api_token, status = 'configured', updated_at = NOW();
+        `, [openrouterKey]);
+        console.log('[VAULT DB SYNC] Chave OpenRouter da JULIANA sincronizada no PostgreSQL.');
       }
     } catch (vErr) {
       console.warn('[VAULT DB SYNC WARN]:', vErr.message);
@@ -1355,57 +1362,51 @@ app.get('/api/v1/crm/overview', async (req, res) => {
   }
 });
 
-// DYNAMIC TASK-BASED MODEL ROUTING ENGINE (NOUS PORTAL PRIMARY)
-const DEFAULT_NOUS_KEY = 'sk-nous-ocH4iFsKAMhgVcjcI1xi3JXj023SPgnV';
-const NOUS_PORTAL_ENDPOINT = 'https://inference-api.nousresearch.com/v1/chat/completions';
+// DYNAMIC TASK-BASED MODEL ROUTING ENGINE (OPENROUTER MIMO-V2.5 CANONICAL ENGINE)
 const OPENROUTER_ENDPOINT = 'https://openrouter.ai/api/v1/chat/completions';
 
 async function getLLMCredentials() {
   const keys = await getRealVaultKeys();
-  const nousVaultKey = (keys.find(k => k.service.toLowerCase().includes('nous')) || {}).rawToken;
   const openrouterVaultKey = (keys.find(k => k.service.toLowerCase().includes('openrouter')) || {}).rawToken;
   
   let julianaVaultFileKey = '';
   try {
-    const julianaEnvPath = path.resolve('D:\\WORKSPACE\\SECURE\\VAULT\\tokens\\llm\\openrouter_juliana.env');
-    if (fs.existsSync(julianaEnvPath)) {
-      const content = fs.readFileSync(julianaEnvPath, 'utf8');
-      const match = content.match(/OPENROUTER_API_KEY=([^\s]+)/);
-      if (match) julianaVaultFileKey = match[1].trim();
+    const possibleVaultPaths = [
+      path.resolve('D:\\WORKSPACE\\SECURE\\VAULT\\tokens\\llm\\openrouter_juliana.env'),
+      '/root/vault/tokens/llm/openrouter_juliana.env',
+      '/workspace/vault/tokens/llm/openrouter_juliana.env'
+    ];
+    for (const vp of possibleVaultPaths) {
+      if (!julianaVaultFileKey && fs.existsSync(vp)) {
+        const content = fs.readFileSync(vp, 'utf8');
+        const match = content.match(/OPENROUTER_API_KEY=([^\s]+)/);
+        if (match) julianaVaultFileKey = match[1].trim();
+      }
     }
   } catch (_) {}
 
-  const nousKey = process.env.NOUS_PORTAL_API_KEY || nousVaultKey || DEFAULT_NOUS_KEY;
   const openrouterKey = process.env.OPENROUTER_API_KEY || openrouterVaultKey || julianaVaultFileKey || '';
 
-  return { nousKey, openrouterKey };
+  return { openrouterKey };
 }
 
-// MODELO PRIMÁRIO OFICIAL (MiMo V2.5 — slug validado empiricamente no OpenRouter em 2026-08-12)
-// NOTA: xiaomi/mimo-v2.5 é um reasoning model — retorna reasoning_content em vez de content
+// MODELO PRIMÁRIO OFICIAL (MiMo V2.5 — OpenRouter)
 const MIMO_PRIMARY_MODEL = 'xiaomi/mimo-v2.5';
 
-// MODELOS ESPECIALISTAS POR FERRAMENTA / MODALIDADE — validados empiricamente em produção (2026-08-12)
+// MODELOS ESPECIALISTAS POR FERRAMENTA / MODALIDADE (OPENROUTER)
 const MODAL_SPECIALIST_MODELS = {
-  CODE: 'xiaomi/mimo-v2.5',                          // Validado OK: 2-3s, autônomo e excelente para código/tools
-  VISION: 'nvidia/nemotron-nano-12b-v2-vl:free',      // Validado OK: multimodal vision-language
-  REASONING: 'xiaomi/mimo-v2.5',                      // Validado OK: reasoning nativo MiMo
-  GENERAL: 'poolside/laguna-s-2.1:free'               // Validado OK: ultra-rápido (1-2s)
+  CODE: 'xiaomi/mimo-v2.5',                          // Validado OK: autônomo e excelente para código/tools
+  VISION: 'nvidia/nemotron-nano-12b-v2-vl:free',      // Multimodal vision-language
+  REASONING: 'xiaomi/mimo-v2.5',                      // Reasoning nativo MiMo
+  GENERAL: 'xiaomi/mimo-v2.5'                         // Ultra-rápido e preciso
 };
 
-// MODELOS FREE DE ALTA DISPONIBILIDADE (FALLBACK 1)
-const NOUS_FREE_MODELS = [
+// MODELOS OPENROUTER DE ALTA DISPONIBILIDADE (FALLBACK EM CASCATA)
+const OPENROUTER_FALLBACK_MODELS = [
   'xiaomi/mimo-v2.5',
-  'poolside/laguna-s-2.1:free',
-  'meta-llama/llama-3.3-70b-instruct:free'
-];
-
-// MODELOS OPENROUTER FREE CONFIRMADOS E ATIVOS
-const OPENROUTER_FREE_TOP_MODELS = [
-  'xiaomi/mimo-v2.5',
-  'poolside/laguna-s-2.1:free',
   'meta-llama/llama-3.3-70b-instruct:free',
-  'nvidia/nemotron-nano-12b-v2-vl:free'
+  'nvidia/nemotron-nano-12b-v2-vl:free',
+  'poolside/laguna-s-2.1:free'
 ];
 
 function selectOptimalModel(promptText, mode, attachments = []) {
@@ -1415,9 +1416,9 @@ function selectOptimalModel(promptText, mode, attachments = []) {
   const hasImageAttachment = Array.isArray(attachments) && attachments.some(a => a.type === 'image' || (a.name && /\.(png|jpg|jpeg|gif|webp|svg)$/i.test(a.name)));
   if (hasImageAttachment || rawText.includes('imagem') || rawText.includes('print') || rawText.includes('screenshot')) {
     return {
-      primary: MODAL_SPECIALIST_MODELS.VISION,         // nvidia/nemotron-nano-12b-v2-vl:free (multimodal, validado)
+      primary: MODAL_SPECIALIST_MODELS.VISION,
       category: 'VISION',
-      fallbacks: ['nvidia/nemotron-3-super-120b-a12b:free', 'hermes-3-llama-3.1-70b', 'poolside/laguna-s-2.1:free'],
+      fallbacks: ['xiaomi/mimo-v2.5', 'meta-llama/llama-3.3-70b-instruct:free', 'poolside/laguna-s-2.1:free'],
       complexity: 'HIGH_VISION'
     };
   }
@@ -1427,9 +1428,9 @@ function selectOptimalModel(promptText, mode, attachments = []) {
     /(?:código|codigo|script|build|deploy|docker|git|vercel|terminal|python|javascript|node|sql|função|funcao|refatorar|bug|fix|error|stack trace)/i.test(rawText);
   if (isCodeTask) {
     return {
-      primary: MODAL_SPECIALIST_MODELS.CODE,           // nvidia/nemotron-3-super-120b-a12b:free (120B, validado)
+      primary: MODAL_SPECIALIST_MODELS.CODE,
       category: 'CODE',
-      fallbacks: ['hermes-3-llama-3.1-405b', 'nvidia/nemotron-3-super-120b-a12b:free', 'poolside/laguna-s-2.1:free', 'hermes-3-llama-3.1-70b'],
+      fallbacks: ['meta-llama/llama-3.3-70b-instruct:free', 'nvidia/nemotron-nano-12b-v2-vl:free', 'poolside/laguna-s-2.1:free'],
       complexity: 'HIGH_CODE'
     };
   }
@@ -1438,18 +1439,18 @@ function selectOptimalModel(promptText, mode, attachments = []) {
   const isReasoningTask = mode === 'CRISIS' || mode === 'CFO' || mode === 'AUDITOR' || rawText.length > 250;
   if (isReasoningTask) {
     return {
-      primary: MODAL_SPECIALIST_MODELS.REASONING,      // xiaomi/mimo-v2.5 (reasoning nativo, validado)
+      primary: MODAL_SPECIALIST_MODELS.REASONING,
       category: 'REASONING',
-      fallbacks: ['hermes-3-llama-3.1-405b', 'nvidia/nemotron-3-super-120b-a12b:free', 'hermes-3-llama-3.1-70b', 'poolside/laguna-s-2.1:free'],
+      fallbacks: ['meta-llama/llama-3.3-70b-instruct:free', 'nvidia/nemotron-nano-12b-v2-vl:free', 'poolside/laguna-s-2.1:free'],
       complexity: 'HEAVY_REASONING'
     };
   }
 
-  // 4. Modalidade Primária Geral (MiMo V2.5 reasoning / poolside fast fallback)
+  // 4. Modalidade Primária Geral (MiMo V2.5)
   return {
-    primary: MIMO_PRIMARY_MODEL,                       // xiaomi/mimo-v2.5 (validado, slug correto)
+    primary: MIMO_PRIMARY_MODEL,
     category: 'GENERAL',
-    fallbacks: ['poolside/laguna-s-2.1:free', 'hermes-3-llama-3.1-70b', 'nvidia/nemotron-3-super-120b-a12b:free', 'hermes-3-llama-3.1-8b'],
+    fallbacks: ['meta-llama/llama-3.3-70b-instruct:free', 'nvidia/nemotron-nano-12b-v2-vl:free', 'poolside/laguna-s-2.1:free'],
     complexity: 'STANDARD'
   };
 }
@@ -1598,7 +1599,7 @@ function normalizeTextToolCalls(message, tools, modelName) {
 }
 
 async function callLLMWithTools(modelName, messages, maxTokens, tools) {
-  const { nousKey, openrouterKey } = await getLLMCredentials();
+  const { openrouterKey } = await getLLMCredentials();
 
   const tryOpenRouter = async (model, withTools = true) => {
     if (!openrouterKey) throw new Error('OpenRouter API Key ausente.');
@@ -1641,80 +1642,26 @@ async function callLLMWithTools(modelName, messages, maxTokens, tools) {
     return normalizedMsg;
   };
 
-  const tryNous = async (model, withTools = true) => {
-    const payload = {
-      model,
-      max_tokens: maxTokens || 1500,
-      messages,
-      ...(withTools && tools && tools.length ? { tools, tool_choice: 'auto' } : {})
-    };
-    const spanStarted = Date.now();
-    log('info', 'llm_span_start', { trace_id: traceStorage.getStore()?.traceId || 'background', provider: 'nous', model });
-    const response = await fetch(NOUS_PORTAL_ENDPOINT, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${nousKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://juliana.axionenterprise.cloud/',
-        'X-Title': 'Hermes Central Juliana (Nous Portal Engine)'
-      },
-      body: JSON.stringify(payload)
-    });
-    log(response.ok ? 'info' : 'error', 'llm_span_end', { trace_id: traceStorage.getStore()?.traceId || 'background', provider: 'nous', model, status: response.status, duration_ms: Date.now() - spanStarted });
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Nous HTTP ${response.status}: ${errText.substring(0, 120)}`);
-    }
-    const data = await response.json();
-    const msg = data.choices?.[0]?.message;
-    if (!msg) throw new Error(`Modelo Nous ${model} retornou choices vazio.`);
-    const normalizedMsg = normalizeTextToolCalls(msg, tools, model);
-    const hasContent = typeof normalizedMsg.content === 'string' && normalizedMsg.content.trim().length > 0;
-    const hasTools = Array.isArray(normalizedMsg.tool_calls) && normalizedMsg.tool_calls.length > 0;
-    if (!hasContent && !hasTools) throw new Error(`Modelo Nous ${model} retornou conteúdo vazio.`);
-    return normalizedMsg;
-  };
-
-  // 1. Tentar o Modelo Primário Solicitado (MiMo V2 ou Especialista Modal)
+  // 1. Tentar o Modelo Solicitado (MiMo V2.5 ou Especialista)
   try {
-    console.log(`[LLM PRIMARY] Calling primary model: ${modelName}`);
-    if (modelName.includes('/') || modelName.includes('mimo')) {
-      const msg = await tryOpenRouter(modelName, true);
-      return msg;
-    } else {
-      const msg = await tryNous(modelName, true);
-      return msg;
-    }
+    console.log(`[LLM PRIMARY] Calling OpenRouter model: ${modelName}`);
+    return await tryOpenRouter(modelName, true);
   } catch (primErr) {
-    console.warn(`[LLM PRIMARY WARN] Modelo primário ${modelName} falhou: ${primErr.message}`);
+    console.warn(`[LLM PRIMARY WARN] Modelo OpenRouter ${modelName} falhou: ${primErr.message}`);
   }
 
-  // 2. FALLBACK 1: Nous Portal Models (Free Tier)
-  for (const model of NOUS_FREE_MODELS) {
+  // 2. Cascata de Fallbacks no OpenRouter
+  for (const fbModel of OPENROUTER_FALLBACK_MODELS) {
+    if (fbModel === modelName) continue;
     try {
-      console.log(`[LLM FALLBACK 1 - NOUS PORTAL] Trying model: ${model}`);
-      const msg = await tryNous(model, true);
-      return msg;
-    } catch (nErr) {
-      console.warn(`[LLM NOUS WARN] ${model} falhou: ${nErr.message}`);
+      console.log(`[LLM FALLBACK - OPENROUTER] Trying fallback model: ${fbModel}`);
+      return await tryOpenRouter(fbModel, true);
+    } catch (fbErr) {
+      console.warn(`[LLM OPENROUTER WARN] ${fbModel} falhou: ${fbErr.message}`);
     }
   }
 
-  // 3. FALLBACK 2: OpenRouter Free Tier Models
-  if (openrouterKey) {
-    console.warn('[LLM FALLBACK 2 - OPENROUTER FREE TIER] Tentando modelos no OpenRouter Free Tier...');
-    for (const fbModel of OPENROUTER_FREE_TOP_MODELS) {
-      try {
-        console.log(`[LLM FALLBACK 2 - OPENROUTER] Trying model: ${fbModel}`);
-        const msg = await tryOpenRouter(fbModel, true);
-        return msg;
-      } catch (orErr) {
-        console.warn(`[LLM OPENROUTER WARN] ${fbModel} falhou: ${orErr.message}`);
-      }
-    }
-  }
-
-  throw new Error(`Todas as tentativas nos motores (MiMo V2, Nous Portal e OpenRouter Free) falharam.`);
+  throw new Error(`Todas as tentativas nos modelos do OpenRouter (MiMo V2.5 e fallbacks) falharam.`);
 }
 
 // MODULE-LEVEL CONTEXT BUILDER — builds the full live system prompt with real DB data
@@ -1936,6 +1883,12 @@ app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
   const realClickUpTasks = await fetchRealClickUpTasks();
   const connectorDocsContext = loadConnectorDocs();
 
+  const routing = selectOptimalModel(fullPromptMessage, mode, attachments);
+  const activeMemories = await getActiveUserMemories();
+  const memoriesSummary = activeMemories.length > 0
+    ? activeMemories.map(m => `- [${m.memory_type}]: ${m.content}`).join('\n')
+    : '- Nenhuma regra ou memória específica registrada.';
+
   let realCrmLeads = [];
   try {
     const crmRes = await pool.query('SELECT name, company, value, stage FROM clients_crm ORDER BY created_at DESC LIMIT 20');
@@ -1955,7 +1908,7 @@ app.post('/api/v1/agent/chat', resilientAgentChat(async (req, res) => {
   const tasksContext = realClickUpTasks || '- Nenhuma tarefa retornada pela ClickUp API no momento.';
   const actionsContext = executedActionsResult ? `\n\n### AÇÕES REAIS EXECUTADAS NO SISTEMA COM BASE NO COMANDO DA JULIANA:\n${executedActionsResult}\n` : '';
 
-  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (NOUS PORTAL INFRASTRUCTURE & REAIS DB):
+  const dynamicContext = `\n\n### ECOSSISTEMA W SOLUÇÕES TECNOLOGIA (OPENROUTER MIMO-V2.5 ENGINE & REAIS DB):
 ${actionsContext}
 [MEMÓRIAS PERSISTENTES E REGRAS DO USUÁRIO (USER_MEMORIES DB)]:
 ${memoriesSummary}
@@ -1973,7 +1926,7 @@ ${crmSummary}
 ${connectorDocsContext || '- Documentação técnica carregada dos conectores.'}
 
 ### INSTRUÇÕES OBRIGATÓRIAS PARA A HERMES CENTRAL JULIANA:
-- Autonomia e ferramentas (Tools) estão 100% habilitadas e ativas via Nous Portal API.
+- Autonomia e ferramentas (Tools) estão 100% habilitadas e ativas via OpenRouter Engine (MiMo-V2.5).
 - Quando a administradora solicitar ações (como "crie a tarefa X no ClickUp", "limpe o vault", "atualize o orçamento Meta Ads", "teste a chave X"), invoque diretamente a ferramenta (Tool) apropriada.
 - **REGRA ANTI-ALUCINAÇÃO E USO DE FERRAMENTAS**: Quando você invocar uma ferramenta (Tool) e receber o resultado real em uma mensagem de ferramenta, utilize SEMPRE esses dados factuais para compor seu relatório final. Se a ferramenta retornar status de sucesso ("success"), apresente o resultado e os dados retornados com total clareza. NUNCA declare que uma ação foi bloqueada ou não autorizada se a ferramenta retornou status de sucesso.
 - **REGRA DE HONESTIDADE SOBRE CAPACIDADES**: Se o usuário solicitar uma ação que não tem ferramenta correspondente, informe com transparência o status atual das APIs configuradas no Vault.

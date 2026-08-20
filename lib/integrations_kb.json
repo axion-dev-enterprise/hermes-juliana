@@ -3,8 +3,7 @@
   "updated_at": "2026-08-06T10:50:00Z",
   "total_connectors": 67,
   "integrations": [
-    { "id": "nous", "name": "Nous Portal (Inference Primary)", "category": "ai_llm", "base_url": "https://inference-api.nousresearch.com/v1", "auth_header": "Authorization Bearer" },
-    { "id": "openrouter", "name": "OpenRouter (Multi-LLM Gateway)", "category": "ai_llm", "base_url": "https://openrouter.ai/api/v1", "auth_header": "Authorization Bearer" },
+    { "id": "openrouter", "name": "OpenRouter (MiMo-V2.5 Primary Gateway)", "category": "ai_llm", "base_url": "https://openrouter.ai/api/v1", "auth_header": "Authorization Bearer" },
     { "id": "openai", "name": "OpenAI API", "category": "ai_llm", "base_url": "https://api.openai.com/v1", "auth_header": "Authorization Bearer" },
     { "id": "anthropic", "name": "Anthropic API", "category": "ai_llm", "base_url": "https://api.anthropic.com/v1", "auth_header": "x-api-key" },
     { "id": "gemini", "name": "Google Gemini API", "category": "ai_llm", "base_url": "https://generativelanguage.googleapis.com/v1beta", "auth_header": "api_key" },

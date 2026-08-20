@@ -12,7 +12,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous">
-  <link rel="stylesheet" href="styles.css?v=6.1.0">
+  <link rel="stylesheet" href="styles.css?v=6.2.0">
 </head>
 <body>
 
@@ -219,7 +219,7 @@
             <span class="status-text">VPS Online</span>
           </div>
           <div class="status-detail">
-            <i class="fa-solid fa-microchip"></i> Nous Portal (Free)
+            <i class="fa-solid fa-microchip"></i> OpenRouter (MiMo-V2.5)
           </div>
           <div class="status-row ws-row">
             <i class="fa-solid fa-bolt text-yellow"></i>
@@ -419,8 +419,7 @@
               <label class="vault-label"><i class="fa-solid fa-grid-2"></i> Serviço</label>
               <select id="vault-service-select" class="vault-select">
                 <optgroup label="🤖 IA & LLM">
-                  <option value="nous_portal">Nous Portal (Inference Primary) ⚡</option>
-                  <option value="openrouter">OpenRouter (Multi-LLM Gateway)</option>
+                  <option value="openrouter" selected>OpenRouter (MiMo-V2.5 / Primary) ⚡</option>
                   <option value="openai">OpenAI — GPT-4o / DALL-E</option>
                   <option value="anthropic">Anthropic — Claude 3.5</option>
                   <option value="gemini">Google Gemini API</option>
@@ -706,6 +705,9 @@
     </form>
   </div>
 
-  <script src="app.js?v=6.0.1"></script>
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <script src="app.js?v=6.2.0"></script>
 </body>
 </html>
