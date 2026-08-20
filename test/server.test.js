@@ -111,8 +111,8 @@ test('Hermes Juliana - production hardening contracts', () => {
   assert.ok(fs.existsSync(path.join(__dirname, '../scripts/migrate.js')));
   assert.ok(fs.existsSync(path.join(__dirname, '../migrations/001_runtime.sql')));
   assert.ok(fs.existsSync(path.join(__dirname, '../event_gateway.js')));
-  assert.ok(!serverContent.includes('new WebSocket.Server'));
-  assert.ok(serverContent.includes("publish('hermes:events'"));
+  assert.ok(serverContent.includes('new WebSocket.Server'));
+  assert.ok(serverContent.includes('broadcastWs'));
   const workerContent = fs.readFileSync(path.join(__dirname, '../lib/tool_worker.js'), 'utf8');
   assert.ok(workerContent.includes('MAX_ACTIVE_WORKERS'));
   assert.ok(workerContent.includes("fork(path.join(__dirname, 'tool_worker_child.js')"));

@@ -6,8 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "test": "node --test test/server.test.js",
+    "test": "node --test test/server.test.js test/llm_routing_and_reasoning.test.js test/frontend_backend_sync.test.js test/api_cascading_flow.test.js test/e2e_verification.test.js test/llm_live_smoke.test.js",
     "test:e2e": "node --test test/e2e_verification.test.js",
+    "test:all": "node --test test/*.test.js",
     "migrate": "node scripts/migrate.js",
     "backup": "powershell -File ./scripts/backup.ps1"
   },

@@ -379,13 +379,13 @@ document.addEventListener('DOMContentLoaded', () => {
     if (file.type.startsWith('image/')) {
       reader.onload = (e) => {
         pendingAttachments.push({ name: file.name, type: file.type, dataUrl: e.target.result });
-        alert(`Imagem [${file.name}] pronta para análise GPT-4o Vision!`);
+        showToast(`Imagem [${file.name}] pronta para envio.`, 'info');
       };
       reader.readAsDataURL(file);
     } else {
       reader.onload = (e) => {
         pendingAttachments.push({ name: file.name, type: file.type, textContent: e.target.result });
-        alert(`Documento [${file.name}] anexado com sucesso!`);
+        showToast(`Documento [${file.name}] anexado com sucesso.`, 'info');
       };
       reader.readAsText(file);
     }
@@ -422,7 +422,16 @@ document.addEventListener('DOMContentLoaded', () => {
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
-          if (data.type === 'agent_chat_progress') {
+          if (data.type === 'agent_chat_response') {
+            if (data.sessionId === activeSessionId) {
+              removeThinkingIndicator('current-thinking');
+              isThinking = false;
+              if (data.message) {
+                appendAgentMessage(data.message, data.model, data.fallback);
+              }
+              loadSessionsList();
+            }
+          } else if (data.type === 'agent_chat_progress') {
             console.log('[WebSocket Chat Progress]', data);
             const title = data.title || '⏳ Tarefa em andamento...';
             const details = data.details || data.resultSummary || '';
@@ -1398,11 +1407,11 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('skill-editor-form')?.addEventListener('submit', async (event) => {
       event.preventDefault(); const name = document.getElementById('skill-editor-name').value.trim(); const content = document.getElementById('skill-editor-content').value;
       const res = await fetch(`/api/v1/skills/${encodeURIComponent(name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content }) });
-      if (res.ok) { closeSkillEditor(); loadSkills(); } else { alert('Não foi possível salvar a skill.'); }
+      if (res.ok) { closeSkillEditor(); loadSkills(); } else { showToast('Não foi possível salvar a skill.', 'error'); }
     });
     document.getElementById('skills-import-input')?.addEventListener('change', async (event) => {
       const file = event.target.files?.[0]; if (!file) return;
-      try { const imported = JSON.parse(await file.text()); for (const skill of (imported.skills || [])) await fetch(`/api/v1/skills/${encodeURIComponent(skill.name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: skill.content }) }); loadSkills(); } catch (_) { alert('Arquivo de skills inválido.'); } finally { event.target.value = ''; }
+      try { const imported = JSON.parse(await file.text()); for (const skill of (imported.skills || [])) await fetch(`/api/v1/skills/${encodeURIComponent(skill.name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: skill.content }) }); loadSkills(); } catch (_) { showToast('Arquivo de skills inválido.', 'error'); } finally { event.target.value = ''; }
     });
   }
   function exportSkills() {
@@ -1421,7 +1430,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btnVoice.addEventListener('click', () => {
       const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (!SpeechRecognition) {
-        alert('Reconhecimento de voz não suportado neste navegador. Use o Google Chrome ou Edge.');
+        showToast('Reconhecimento de voz não suportado neste navegador. Use o Google Chrome ou Edge.', 'warning');
         return;
       }
 
